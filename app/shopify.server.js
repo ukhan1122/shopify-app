@@ -14,13 +14,13 @@ const shopify = shopifyApp({
     "read_products",
     "write_products", 
     "read_inventory",
-    "write_inventory",
     "read_locations"
   ],
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: new MemorySessionStorage(), // CHANGED: Using Memory instead of Prisma
+  sessionStorage: new MemorySessionStorage(),
   distribution: AppDistribution.AppStore,
+  isEmbeddedApp: true,
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
