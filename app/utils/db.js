@@ -16,62 +16,11 @@ export async function getDB() {
   return await pool.getConnection();
 }
 
-// Check if store_domain column exists
-async function checkStoreDomainColumn() {
-  let connection;
-  try {
-    connection = await getDB();
-    const [columns] = await connection.execute(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_SCHEMA = 'my_shop' 
-      AND TABLE_NAME = 'products' 
-      AND COLUMN_NAME = 'store_domain'
-    `);
-    return columns.length > 0;
-  } catch (error) {
-    console.error('❌ Error checking store_domain column:', error);
-    return false;
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-// Updated database schema with store separation
+// Updated database schema - SINGLE TABLE ONLY
 export async function ensureDatabaseSchema() {
   let connection;
   try {
     connection = await getDB();
-    
-    // First, check if store_domain column exists
-    const hasStoreDomain = await checkStoreDomainColumn();
-    
-    if (!hasStoreDomain) {
-      console.log('🔄 Adding store_domain column to products table...');
-      
-      // Add store_domain column
-      await connection.execute(`
-        ALTER TABLE products ADD COLUMN store_domain VARCHAR(255)
-      `);
-      
-      // Add index
-      await connection.execute(`
-        CREATE INDEX idx_store_domain ON products(store_domain)
-      `);
-      
-      // Update existing records
-      await connection.execute(`
-        UPDATE products SET store_domain = 'default-store.myshopify.com' 
-        WHERE store_domain IS NULL
-      `);
-      
-      // Make store_domain NOT NULL
-      await connection.execute(`
-        ALTER TABLE products MODIFY store_domain VARCHAR(255) NOT NULL
-      `);
-      
-      console.log('✅ store_domain column added successfully!');
-    }
     
     // Ensure the main table structure with composite unique key
     await connection.execute(`
@@ -95,7 +44,7 @@ export async function ensureDatabaseSchema() {
       )
     `);
     
-    console.log('✅ Database schema with store separation is ready!');
+    console.log('✅ Single products table is ready!');
     return true;
     
   } catch (error) {
@@ -107,105 +56,25 @@ export async function ensureDatabaseSchema() {
 }
 
 // ============================================================================
-// STORE TABLE AUTOMATIC CREATION FUNCTIONS
+// MAIN FUNCTIONS - SINGLE TABLE ONLY
 // ============================================================================
 
 /**
- * Extract clean store name from domain
+ * Save products to SINGLE products table
  */
-export function extractStoreName(storeDomain) {
-  return storeDomain.replace('.myshopify.com', '').replace(/[^a-zA-Z0-9]/g, '_');
-}
-
-/**
- * Check if a store table exists
- */
-export async function storeTableExists(storeName) {
+export async function saveProductsToDB(products, storeDomain) {
   let connection;
   try {
     connection = await getDB();
-    const tableName = storeName;
     
-    const [tables] = await connection.execute(
-      `SELECT TABLE_NAME 
-       FROM INFORMATION_SCHEMA.TABLES 
-       WHERE TABLE_SCHEMA = 'my_shop' 
-       AND TABLE_NAME = ?`,
-      [tableName]
-    );
-    
-    return tables.length > 0;
-  } catch (error) {
-    console.error('❌ Error checking store table:', error);
-    return false;
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-/**
- * Create a new store table automatically
- */
-export async function createStoreTable(storeName) {
-  let connection;
-  try {
-    connection = await getDB();
-    const tableName =  storeName;
-    
-    // Check if table already exists
-    if (await storeTableExists(storeName)) {
-      console.log(`✅ Store table already exists: ${tableName}`);
-      return tableName;
-    }
-    
-    // Create the store-specific table
-    const createTableSQL = `
-      CREATE TABLE ${tableName} (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        shopify_id VARCHAR(255),
-        title VARCHAR(255),
-        description TEXT,
-        image_url VARCHAR(500),
-        product_condition VARCHAR(50),
-        brand VARCHAR(100),
-        size VARCHAR(50),
-        price VARCHAR(100),
-        inventory_quantity INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_shopify_id (shopify_id),
-        INDEX idx_shopify_id (shopify_id),
-        INDEX idx_brand (brand),
-        INDEX idx_inventory (inventory_quantity)
-      )
-    `;
-    
-    await connection.execute(createTableSQL);
-    console.log(`✅ Store table created: ${tableName}`);
-    
-    return tableName;
-  } catch (error) {
-    console.error('❌ Error creating store table:', error);
-    throw error;
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-/**
- * Save products to store-specific table
- */
-export async function saveProductsToStoreTable(storeName, products) {
-  let connection;
-  try {
-    connection = await getDB();
-    const tableName = storeName;
+    // Ensure schema is up to date
+    await ensureDatabaseSchema();
     
     let savedCount = 0;
     let updatedCount = 0;
     let errorCount = 0;
     
-    console.log(`🔄 Saving ${products.length} products to ${tableName}...`);
+    console.log(`🔄 Saving ${products.length} products to single table for: ${storeDomain}`);
     
     for (const productEdge of products) {
       const product = productEdge.node;
@@ -223,19 +92,19 @@ export async function saveProductsToStoreTable(storeName, products) {
           continue;
         }
         
-        // Check if product exists in store table
+        // Check if product exists for THIS STORE
         const [existingProducts] = await connection.execute(
-          `SELECT id FROM ${tableName} WHERE shopify_id = ?`,
-          [shopifyId]
+          'SELECT id, title, inventory_quantity FROM products WHERE shopify_id = ? AND store_domain = ?',
+          [shopifyId, storeDomain]
         );
         
         if (existingProducts.length > 0) {
           // Update existing product
           await connection.execute(
-            `UPDATE ${tableName} SET 
+            `UPDATE products SET 
               title = ?, description = ?, image_url = ?, product_condition = ?, 
               brand = ?, size = ?, price = ?, inventory_quantity = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE shopify_id = ?`,
+            WHERE shopify_id = ? AND store_domain = ?`,
             [
               product.title,
               product.description || '',
@@ -245,18 +114,19 @@ export async function saveProductsToStoreTable(storeName, products) {
               product.size || 'One Size',
               product.price || 'Price not available',
               product.inventory || 0,
-              shopifyId
+              shopifyId,
+              storeDomain
             ]
           );
           updatedCount++;
-          console.log(`🔵 Updated in ${tableName}: ${product.title}`);
+          console.log(`🔵 Updated: ${product.title}`);
         } else {
           // Insert new product
           await connection.execute(
-            `INSERT INTO ${tableName} (
+            `INSERT INTO products (
               shopify_id, title, description, image_url, product_condition, 
-              brand, size, price, inventory_quantity
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              brand, size, price, inventory_quantity, store_domain
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               shopifyId,
               product.title,
@@ -266,20 +136,21 @@ export async function saveProductsToStoreTable(storeName, products) {
               product.brand || 'Luxury Brand',
               product.size || 'One Size',
               product.price || 'Price not available',
-              product.inventory || 0
+              product.inventory || 0,
+              storeDomain
             ]
           );
           savedCount++;
-          console.log(`🆕 Added to ${tableName}: ${product.title}`);
+          console.log(`🆕 Added: ${product.title}`);
         }
         
       } catch (error) {
-        console.error(`❌ Error saving product to ${tableName}:`, error.message);
+        console.error(`❌ Error saving product:`, error.message);
         errorCount++;
       }
     }
     
-    console.log(`✅ Store table sync completed for ${tableName}:`);
+    console.log(`✅ Single table sync completed for ${storeDomain}:`);
     console.log(`   📥 New products: ${savedCount}`);
     console.log(`   🔄 Updated products: ${updatedCount}`);
     console.log(`   ❌ Errors: ${errorCount}`);
@@ -288,12 +159,11 @@ export async function saveProductsToStoreTable(storeName, products) {
       success: true, 
       saved: savedCount, 
       updated: updatedCount, 
-      errors: errorCount,
-      tableName: tableName
+      errors: errorCount
     };
     
   } catch (error) {
-    console.error('❌ Error in saveProductsToStoreTable:', error);
+    console.error('❌ Database error in saveProductsToDB:', error.message);
     throw error;
   } finally {
     if (connection) await connection.release();
@@ -301,105 +171,23 @@ export async function saveProductsToStoreTable(storeName, products) {
 }
 
 /**
- * Get products from store-specific table
+ * Get products from SINGLE table for specific store
  */
-export async function getProductsFromStoreTable(storeName) {
+export async function getProductsFromDB(storeDomain) {
   let connection;
   try {
     connection = await getDB();
-    const tableName = storeName;
-    
-    // Check if table exists first
-    if (!await storeTableExists(storeName)) {
-      console.log(`🔵 Store table doesn't exist yet: ${tableName}`);
-      return [];
-    }
-    
     const [products] = await connection.execute(
-      `SELECT * FROM ${tableName} ORDER BY id DESC`
+      'SELECT * FROM products WHERE store_domain = ? ORDER BY id DESC', 
+      [storeDomain]
     );
-    
-    console.log(`📊 Retrieved ${products.length} products from ${tableName}`);
+    console.log(`📊 Retrieved ${products.length} products for: ${storeDomain}`);
     return products;
   } catch (error) {
-    console.error(`❌ Error getting products from store table:`, error);
+    console.error(`❌ Error fetching products for ${storeDomain}:`, error);
     return [];
   } finally {
     if (connection) await connection.release();
-  }
-}
-
-/**
- * Get all store tables
- */
-export async function getAllStoreTables() {
-  let connection;
-  try {
-    connection = await getDB();
-    
-    const [tables] = await connection.execute(
-      `SELECT TABLE_NAME 
-       FROM INFORMATION_SCHEMA.TABLES 
-       WHERE TABLE_SCHEMA = 'my_shop' 
-       AND TABLE_NAME NOT IN ('products', 'Session')` // CHANGED: Remove "store_%" pattern
-    );
-    
-    const storeNames  = tables.map(table => table.TABLE_NAME); // ✅ Just return the table names directly
-    
-    
-    return storeNames;
-  } catch (error) {
-    console.error('❌ Error getting store tables:', error);
-    return [];
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-/**
- * Auto-create store table and save products (MAIN FUNCTION)
- */
-export async function saveProductsToAutoStoreTable(storeDomain, products) {
-  try {
-    // Extract clean store name
-    const storeName = extractStoreName(storeDomain);
-    console.log(`🏪 Processing store: ${storeName} (from ${storeDomain})`);
-    
-    // Create store table if it doesn't exist
-    const tableName = await createStoreTable(storeName);
-    
-    // Save products to store-specific table
-    const result = await saveProductsToStoreTable(storeName, products);
-    
-    return {
-      ...result,
-      storeName: storeName,
-      storeDomain: storeDomain
-    };
-    
-  } catch (error) {
-    console.error('❌ Error in saveProductsToAutoStoreTable:', error);
-    throw error;
-  }
-}
-
-/**
- * Get products from store-specific table (MAIN FUNCTION)
- */
-export async function getProductsFromAutoStoreTable(storeDomain) {
-  try {
-    const storeName = extractStoreName(storeDomain);
-    const products = await getProductsFromStoreTable(storeName);
-    
-    // Add store domain to each product for display
-    return products.map(product => ({
-      ...product,
-      store_domain: storeDomain
-    }));
-    
-  } catch (error) {
-    console.error('❌ Error in getProductsFromAutoStoreTable:', error);
-    return [];
   }
 }
 
@@ -410,31 +198,20 @@ export async function getAllStoresWithStats() {
   let connection;
   try {
     connection = await getDB();
-    const storeNames = await getAllStoreTables();
     
-    const storesWithStats = [];
+    const [stores] = await connection.execute(`
+      SELECT 
+        store_domain as name,
+        store_domain as domain,
+        COUNT(*) as productCount,
+        SUM(inventory_quantity) as totalInventory,
+        'products' as tableName
+      FROM products 
+      GROUP BY store_domain
+      ORDER BY store_domain
+    `);
     
-    for (const storeName of storeNames) {
-      const tableName = storeName;
-      
-      const [productCount] = await connection.execute(
-        `SELECT COUNT(*) as count FROM ${tableName}`
-      );
-      
-      const [inventorySum] = await connection.execute(
-        `SELECT SUM(inventory_quantity) as total FROM ${tableName}`
-      );
-      
-      storesWithStats.push({
-        name: storeName,
-        domain: `${storeName}.myshopify.com`,
-        productCount: productCount[0].count,
-        totalInventory: inventorySum[0].total || 0,
-        tableName: tableName
-      });
-    }
-    
-    return storesWithStats;
+    return stores;
   } catch (error) {
     console.error('❌ Error getting stores with stats:', error);
     return [];
@@ -444,7 +221,7 @@ export async function getAllStoresWithStats() {
 }
 
 // ============================================================================
-// EXISTING FUNCTIONS (KEEP THESE FOR BACKWARD COMPATIBILITY)
+// BIDIRECTIONAL SYNC FUNCTIONS
 // ============================================================================
 
 // Helper function to detect changes between DB and Shopify
@@ -478,7 +255,8 @@ export async function detectChanges(dbProducts, shopifyProducts, storeDomain) {
           shopifyId: dbProduct.shopify_id,
           dbTitle: dbTitle,
           shopifyTitle: shopifyTitle,
-          type: 'TITLE'
+          type: 'TITLE_DB_TO_SHOPIFY',
+          direction: 'DB_TO_SHOPIFY'
         });
         console.log(`📝 Title difference [${storeDomain}]: DB="${dbTitle}" vs Shopify="${shopifyTitle}"`);
       }
@@ -490,165 +268,33 @@ export async function detectChanges(dbProducts, shopifyProducts, storeDomain) {
           shopifyId: dbProduct.shopify_id,
           dbInventory: dbInventory,
           shopifyInventory: shopifyInventory,
-          type: 'INVENTORY'
+          type: 'INVENTORY_DB_TO_SHOPIFY',
+          direction: 'DB_TO_SHOPIFY'
         });
         console.log(`📦 Inventory difference [${storeDomain}]: DB=${dbInventory} vs Shopify=${shopifyInventory}`);
       }
     }
   }
-  
-  console.log(`📝 Found ${titleChanges.length} title changes needing sync for ${storeDomain}`);
-  console.log(`📦 Found ${inventoryChanges.length} inventory changes needing sync for ${storeDomain}`);
-  
-  return { titleChanges, inventoryChanges };
-}
 
-// Save products from Shopify to DB with store separation (ORIGINAL FUNCTION)
-export async function saveProductsToDB(products, storeDomain) {
-  let connection;
-  try {
-    connection = await getDB();
-    
-    // Ensure schema is up to date
-    await ensureDatabaseSchema();
-    
-    let savedCount = 0;
-    let updatedCount = 0;
-    let errorCount = 0;
-    let titleChanges = [];
-    let inventoryChanges = [];
-    
-    console.log(`🔄 Processing ${products.length} products from ${storeDomain}...`);
-    
-    for (const productEdge of products) {
-      const product = productEdge.node;
-      
-      try {
-        // Extract Shopify ID
-        let shopifyId = product.id;
-        if (shopifyId && shopifyId.includes('/')) {
-          shopifyId = shopifyId.split('/').pop();
-        }
-        
-        if (!shopifyId) {
-          console.error(`❌ Missing shopify_id for product in ${storeDomain}:`, product.title);
-          errorCount++;
-          continue;
-        }
-        
-        // Check if product exists for THIS STORE
-        const [existingProducts] = await connection.execute(
-          'SELECT id, title, inventory_quantity FROM products WHERE shopify_id = ? AND store_domain = ?',
-          [shopifyId, storeDomain]
-        );
-        
-        if (existingProducts.length > 0) {
-          const existingProduct = existingProducts[0];
-          const oldTitle = existingProduct.title;
-          const newTitle = product.title;
-          const oldInventory = existingProduct.inventory_quantity || 0;
-          const newInventory = product.inventory || 0;
-          const titleChanged = oldTitle !== newTitle;
-          const inventoryChanged = oldInventory !== newInventory;
-          
-          // Update existing product FOR THIS STORE
-          const [updateResult] = await connection.execute(
-            `UPDATE products SET 
-              title = ?, description = ?, image_url = ?, product_condition = ?, 
-              brand = ?, size = ?, price = ?, inventory_quantity = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE shopify_id = ? AND store_domain = ?`,
-            [
-              newTitle,
-              product.description || '',
-              product.mainImage || '',
-              product.condition || 'Unknown',
-              product.brand || 'Luxury Brand',
-              product.size || 'One Size',
-              product.price || 'Price not available',
-              newInventory,
-              shopifyId,
-              storeDomain
-            ]
-          );
-          
-          updatedCount++;
-          
-          if (titleChanged) {
-            titleChanges.push({
-              from: oldTitle,
-              to: newTitle,
-              shopifyId: shopifyId,
-              storeDomain: storeDomain
-            });
-            console.log(`📝 TITLE UPDATED [${storeDomain}]: "${oldTitle}" → "${newTitle}"`);
-          }
-          
-          if (inventoryChanged) {
-            inventoryChanges.push({
-              from: oldInventory,
-              to: newInventory,
-              shopifyId: shopifyId,
-              storeDomain: storeDomain
-            });
-            console.log(`📦 INVENTORY UPDATED [${storeDomain}]: ${oldInventory} → ${newInventory}`);
-          }
-          
-          if (!titleChanged && !inventoryChanged) {
-            console.log(`🔵 No changes [${storeDomain}]: "${oldTitle}" (Inventory: ${oldInventory})`);
-          }
-          
-        } else {
-          // Insert new product WITH STORE DOMAIN
-          await connection.execute(
-            `INSERT INTO products (
-              shopify_id, title, description, image_url, product_condition, 
-              brand, size, price, inventory_quantity, store_domain
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              shopifyId,
-              product.title,
-              product.description || '',
-              product.mainImage || '',
-              product.condition || 'Unknown',
-              product.brand || 'Luxury Brand',
-              product.size || 'One Size',
-              product.price || 'Price not available',
-              product.inventory || 0,
-              storeDomain
-            ]
-          );
-          savedCount++;
-          console.log(`🆕 New product added to ${storeDomain}: ${product.title}`);
-        }
-        
-      } catch (error) {
-        console.error(`❌ Error saving ${product.title} to ${storeDomain}:`, error.message);
-        errorCount++;
-      }
+  // Detect Shopify → DB changes (new products or changes that should update DB)
+  for (const shopifyProduct of shopifyProducts) {
+    let shopifyId = shopifyProduct.node.id;
+    if (shopifyId && shopifyId.includes('/')) {
+      shopifyId = shopifyId.split('/').pop();
     }
     
-    console.log(`✅ Database sync completed for ${storeDomain}:`);
-    console.log(`   📥 New products: ${savedCount}`);
-    console.log(`   🔄 Updated products: ${updatedCount}`);
-    console.log(`   ❌ Errors: ${errorCount}`);
-    console.log(`   📝 Title changes: ${titleChanges.length}`);
-    console.log(`   📦 Inventory changes: ${inventoryChanges.length}`);
+    const dbProduct = dbProducts.find(db => db.shopify_id === shopifyId);
     
-    return { 
-      success: true, 
-      saved: savedCount, 
-      updated: updatedCount, 
-      errors: errorCount,
-      titleChanges: titleChanges.length,
-      inventoryChanges: inventoryChanges.length
-    };
-    
-  } catch (error) {
-    console.error('❌ Database error in saveProductsToDB:', error.message);
-    throw error;
-  } finally {
-    if (connection) await connection.release();
+    if (!dbProduct) {
+      // New product in Shopify that doesn't exist in DB
+      console.log(`🆕 New product in Shopify: ${shopifyProduct.node.title}`);
+    }
   }
+  
+  console.log(`📝 Found ${titleChanges.length} title changes DB → Shopify for ${storeDomain}`);
+  console.log(`📦 Found ${inventoryChanges.length} inventory changes DB → Shopify for ${storeDomain}`);
+  
+  return { titleChanges, inventoryChanges };
 }
 
 // Update product title in Shopify
@@ -857,25 +503,20 @@ export async function syncInventoryToShopify(admin, productId, storeDomain) {
   }
 }
 
-// Get all products FOR SPECIFIC STORE
-export async function getAllProducts(storeDomain) {
-  let connection;
-  try {
-    connection = await getDB();
-    const [products] = await connection.execute(
-      'SELECT * FROM products WHERE store_domain = ? ORDER BY id DESC', 
-      [storeDomain]
-    );
-    return products;
-  } catch (error) {
-    console.error(`❌ Error fetching products for ${storeDomain}:`, error);
-    return [];
-  } finally {
-    if (connection) await connection.release();
-  }
+// ============================================================================
+// COMPATIBILITY FUNCTIONS (Keep for backward compatibility)
+// ============================================================================
+
+// Alias functions for compatibility with your existing code
+export async function saveProductsToAutoStoreTable(storeDomain, products) {
+  return await saveProductsToDB(products, storeDomain);
 }
 
-// Update product inventory in database FOR SPECIFIC STORE
+export async function getProductsFromAutoStoreTable(storeDomain) {
+  return await getProductsFromDB(storeDomain);
+}
+
+// Other utility functions (keep as is)
 export async function updateProductInventory(productId, newInventory, storeDomain) {
   let connection;
   try {
@@ -897,7 +538,6 @@ export async function updateProductInventory(productId, newInventory, storeDomai
   }
 }
 
-// Get product by ID FOR SPECIFIC STORE
 export async function getProductById(productId, storeDomain) {
   let connection;
   try {
@@ -915,109 +555,6 @@ export async function getProductById(productId, storeDomain) {
   }
 }
 
-// Get product by Shopify ID FOR SPECIFIC STORE
-export async function getProductByShopifyId(shopifyId, storeDomain) {
-  let connection;
-  try {
-    connection = await getDB();
-    const [products] = await connection.execute(
-      'SELECT * FROM products WHERE shopify_id = ? AND store_domain = ?', 
-      [shopifyId, storeDomain]
-    );
-    return products[0] || null;
-  } catch (error) {
-    console.error(`❌ Error fetching product by Shopify ID for ${storeDomain}:`, error);
-    return null;
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-// Get low inventory products FOR SPECIFIC STORE
-export async function getLowInventoryProducts(storeDomain, threshold = 5) {
-  let connection;
-  try {
-    connection = await getDB();
-    const [products] = await connection.execute(
-      'SELECT * FROM products WHERE store_domain = ? AND inventory_quantity <= ? ORDER BY inventory_quantity ASC',
-      [storeDomain, threshold]
-    );
-    return products;
-  } catch (error) {
-    console.error(`❌ Error fetching low inventory products for ${storeDomain}:`, error);
-    return [];
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-// Get inventory summary FOR SPECIFIC STORE
-export async function getInventorySummary(storeDomain) {
-  let connection;
-  try {
-    connection = await getDB();
-    const [summary] = await connection.execute(`
-      SELECT 
-        COUNT(*) as total_products,
-        SUM(inventory_quantity) as total_inventory,
-        AVG(inventory_quantity) as avg_inventory,
-        COUNT(CASE WHEN inventory_quantity = 0 THEN 1 END) as out_of_stock,
-        COUNT(CASE WHEN inventory_quantity <= 5 THEN 1 END) as low_stock
-      FROM products
-      WHERE store_domain = ?
-    `, [storeDomain]);
-    return summary[0];
-  } catch (error) {
-    console.error(`❌ Error getting inventory summary for ${storeDomain}:`, error);
-    return null;
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-// NEW: Get database stats with store separation
-export async function getDatabaseStats(storeDomain = null) {
-  let connection;
-  try {
-    connection = await getDB();
-    
-    let totalProducts, storeProducts, totalStores, stores;
-    
-    // Overall stats
-    const [totalCount] = await connection.execute('SELECT COUNT(*) as count FROM products');
-    const [storesCount] = await connection.execute('SELECT COUNT(DISTINCT store_domain) as count FROM products');
-    const [storesList] = await connection.execute('SELECT DISTINCT store_domain FROM products ORDER BY store_domain');
-    
-    totalProducts = totalCount[0].count;
-    totalStores = storesCount[0].count;
-    stores = storesList.map(row => row.store_domain);
-    
-    // Store-specific stats
-    if (storeDomain) {
-      const [storeCount] = await connection.execute(
-        'SELECT COUNT(*) as count FROM products WHERE store_domain = ?',
-        [storeDomain]
-      );
-      storeProducts = storeCount[0].count;
-    }
-    
-    return {
-      totalProducts: totalProducts,
-      storeProducts: storeProducts || null,
-      totalStores: totalStores,
-      stores: stores,
-      timestamp: new Date().toISOString()
-    };
-    
-  } catch (error) {
-    console.error('❌ Error getting database stats:', error);
-    return null;
-  } finally {
-    if (connection) await connection.release();
-  }
-}
-
-// Reset database completely or for specific store
 export async function resetDatabase(storeDomain = null) {
   let connection;
   try {
@@ -1028,11 +565,9 @@ export async function resetDatabase(storeDomain = null) {
       await connection.execute('DELETE FROM products WHERE store_domain = ?', [storeDomain]);
       console.log(`✅ Products reset for store: ${storeDomain}`);
     } else {
-      console.log('🔄 Resetting all database tables...');
-      await connection.execute('DROP TABLE IF EXISTS products');
-      console.log('✅ Database tables dropped successfully');
-      await ensureDatabaseSchema();
-      console.log('✅ Database reset and schema recreated!');
+      console.log('🔄 Resetting all products...');
+      await connection.execute('DELETE FROM products');
+      console.log('✅ All products deleted!');
     }
     
     return true;

@@ -1,5 +1,5 @@
 import { useLoaderData, useFetcher } from "react-router";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import '../styles/Productlist.css';
 
 // PRELOVED-SPECIFIC EXTRACTION FUNCTIONS (client-side only)
@@ -124,129 +124,87 @@ function extractMainImage(product) {
   return null;
 }
 
-// Server-side loader with AUTOMATIC TABLE CREATION
+// Server-side loader - ONLY GET FROM DATABASE
 export async function loader({ request }) {
   try {
     const { authenticate } = await import("../shopify.server");
     const { 
       getProductsFromAutoStoreTable, 
-      saveProductsToAutoStoreTable, 
       getAllStoresWithStats 
     } = await import("../utils/db");
     
-    console.log("🔄 Loader: Starting session authentication...");
+    const { session } = await authenticate.admin(request);
+    const storeDomain = session.shop;
     
-    try {
-      const { admin, session } = await authenticate.admin(request);
-      const storeDomain = session.shop;
-      
-      console.log("✅ Loader: Session validated successfully");
-      console.log(`🏪 Current Store: ${storeDomain}`);
-      
-      // Get current store's products from Shopify
-      const response = await admin.graphql(
-        `#graphql
-          query {
-            products(first: 50) {
-              edges {
-                node {
-                  id
-                  title
-                  description
-                  vendor
-                  tags
-                  totalInventory
-                  featuredImage { url }
-                  variants(first: 5) {
-                    edges {
-                      node {
-                        id
-                        inventoryQuantity
-                        selectedOptions { name value }
-                      }
-                    }
-                  }
-                  priceRange {
-                    minVariantPrice { amount currencyCode }
-                  }
-                }
-              }
-            }
-          }`
-      );
-      
-      const data = await response.json();
-      
-      if (!data.data || !data.data.products) {
-        throw new Error('Invalid response from Shopify API');
-      }
-      
-      const shopifyProducts = data.data.products.edges;
-      console.log(`🛍️ Loader: Loaded ${shopifyProducts.length} products from Shopify store: ${storeDomain}`);
-      
-      // Process Shopify products
-      const processedShopifyProducts = shopifyProducts.map(productEdge => {
-        const product = productEdge.node;
-        
-        return {
-          ...productEdge,
-          node: {
-            ...product,
-            condition: extractConditionFromPreloved(product),
-            brand: extractBrandFromPreloved(product),
-            size: extractSizeFromPreloved(product),
-            price: extractPriceFromPreloved(product),
-            inventory: extractInventoryFromPreloved(product),
-            mainImage: extractMainImage(product)
-          }
-        };
-      });
-
-      // ✅ AUTOMATICALLY CREATE STORE TABLE AND SAVE PRODUCTS
-      const saveResult = await saveProductsToAutoStoreTable(storeDomain, processedShopifyProducts);
-      
-      // ✅ GET PRODUCTS FROM STORE-SPECIFIC TABLE
-      const dbProducts = await getProductsFromAutoStoreTable(storeDomain);
-      
-      // ✅ GET ALL STORES STATS
-      const allStores = await getAllStoresWithStats();
-      
-      console.log(`📊 Store Stats [${storeDomain}]: ${dbProducts.length} products in store table`);
-      console.log(`🏪 Total Stores: ${allStores.length}`);
-      
-      return { 
-        products: dbProducts,
-        shopifyProductsCount: shopifyProducts.length,
-        sessionValid: true,
-        currentStore: storeDomain,
-        storeTable: saveResult.tableName,
-        allStores: allStores,
-        timestamp: Date.now()
-      };
-      
-    } catch (authError) {
-      console.error("❌ Loader: Authentication failed:", authError.message);
-      return { 
-        products: [],
-        shopifyProductsCount: 0,
-        error: "Authentication failed. Please refresh the page.",
-        timestamp: Date.now()
-      };
-    }
-    
-  } catch (error) {
-    console.error("❌ Loader error:", error.message);
+    const dbProducts = await getProductsFromAutoStoreTable(storeDomain);
+    const allStores = await getAllStoresWithStats();
     
     return { 
+      products: dbProducts,
+      sessionValid: true,
+      currentStore: storeDomain,
+      allStores: allStores,
+      timestamp: Date.now()
+    };
+    
+  } catch (error) {
+    return { 
       products: [],
-      shopifyProductsCount: 0,
-      error: "Failed to load products. Please refresh the page.",
+      error: "Failed to load products from database.",
       timestamp: Date.now()
     };
   }
 }
 
-// Server-side action with store separation
+// SIMPLE SYNC FUNCTION: ALWAYS accept Shopify changes
+async function syncShopifyToDB(storeDomain, shopifyProducts) {
+  const { saveProductsToDB } = await import("../utils/db");
+  
+  let savedCount = 0;
+  let updatedCount = 0;
+  let errorCount = 0;
+  
+  console.log(`🔄 Syncing ALL Shopify changes to DB...`);
+  
+  // Process each Shopify product
+  for (const productEdge of shopifyProducts) {
+    const product = productEdge.node;
+    
+    try {
+      // Extract Shopify ID
+      let shopifyId = product.id;
+      if (shopifyId && shopifyId.includes('/')) {
+        shopifyId = shopifyId.split('/').pop();
+      }
+      
+      if (!shopifyId) {
+        console.error(`❌ Missing shopify_id for product:`, product.title);
+        errorCount++;
+        continue;
+      }
+      
+      // ALWAYS save Shopify data to DB (this will create or update)
+      await saveProductsToDB([productEdge], storeDomain);
+      updatedCount++;
+      console.log(`✅ Updated from Shopify: ${product.title}`);
+      
+    } catch (error) {
+      console.error(`❌ Error syncing product:`, error.message);
+      errorCount++;
+    }
+  }
+  
+  console.log(`✅ Shopify sync completed: ${updatedCount} updated, ${errorCount} errors`);
+  
+  return { 
+    success: true, 
+    saved: savedCount, 
+    updated: updatedCount, 
+    errors: errorCount
+  };
+}
+
+// Server-side action - BIDIRECTIONAL SYNC (SIMPLE AND RELIABLE)
 export async function action({ request }) {
   try {
     const { authenticate } = await import("../shopify.server");
@@ -259,193 +217,149 @@ export async function action({ request }) {
       getAllStoresWithStats 
     } = await import("../utils/db");
     
-    console.log("🔄 Action: Starting SMART bidirectional sync with automatic table creation...");
+    const { admin, session } = await authenticate.admin(request);
+    const storeDomain = session.shop;
+
+    let syncResults = {
+      dbToShopify: { titleSynced: 0, inventorySynced: 0, errors: 0 },
+      shopifyToDB: { saved: 0, updated: 0, errors: 0 }
+    };
+
+    // STEP 1: Get CURRENT DB data
+    const currentDBProducts = await getProductsFromAutoStoreTable(storeDomain);
+    console.log(`📋 Current DB products: ${currentDBProducts.length}`);
     
-    try {
-      // Authenticate for THIS request - fresh session every time
-      const { admin, session } = await authenticate.admin(request);
-      const storeDomain = session.shop;
-      
-      console.log("✅ Action: Session validated, starting sync...");
-      console.log(`🏪 Syncing with store: ${storeDomain}`);
-
-      let syncResults = {
-        shopifyToDB: { saved: 0, updated: 0, errors: 0, titleChanges: 0, inventoryChanges: 0 },
-        dbToShopify: { titleSynced: 0, inventorySynced: 0, errors: 0 },
-        currentStore: storeDomain
-      };
-
-      // STEP 1: Get current data from both sources
-      console.log("📊 STEP 1: Getting current data from both sources...");
-      
-      const originalDBProducts = await getProductsFromAutoStoreTable(storeDomain);
-      console.log(`📋 Current DB products for ${storeDomain}: ${originalDBProducts.length}`);
-      
-      // Get current Shopify products from CURRENT STORE
-      const response = await admin.graphql(
-        `#graphql
-          query {
-            products(first: 50) {
-              edges {
-                node {
-                  id
-                  title
-                  description
-                  vendor
-                  tags
-                  totalInventory
-                  featuredImage { url }
-                  variants(first: 5) {
-                    edges {
-                      node {
-                        id
-                        inventoryQuantity
-                        selectedOptions { name value }
-                      }
+    // STEP 2: Get current Shopify products
+    const response = await admin.graphql(
+      `#graphql
+        query {
+          products(first: 50) {
+            edges {
+              node {
+                id
+                title
+                description
+                vendor
+                tags
+                totalInventory
+                featuredImage { url }
+                variants(first: 5) {
+                  edges {
+                    node {
+                      id
+                      inventoryQuantity
+                      selectedOptions { name value }
                     }
                   }
-                  priceRange {
-                    minVariantPrice { amount currencyCode }
-                  }
+                }
+                priceRange {
+                  minVariantPrice { amount currencyCode }
                 }
               }
             }
-          }`
-      );
-      
-      const data = await response.json();
-      
-      if (!data.data || !data.data.products) {
-        throw new Error('Invalid response from Shopify API');
-      }
-      
-      const shopifyProducts = data.data.products.edges;
-      console.log(`📋 Current Shopify products from ${storeDomain}: ${shopifyProducts.length}`);
-      
-      // Process Shopify products for comparison
-      const processedShopifyProducts = shopifyProducts.map(productEdge => {
-        const product = productEdge.node;
-        
-        return {
-          ...productEdge,
-          node: {
-            ...product,
-            condition: extractConditionFromPreloved(product),
-            brand: extractBrandFromPreloved(product),
-            size: extractSizeFromPreloved(product),
-            price: extractPriceFromPreloved(product),
-            inventory: extractInventoryFromPreloved(product),
-            mainImage: extractMainImage(product)
           }
-        };
-      });
+        }`
+    );
+    
+    const data = await response.json();
+    const shopifyProducts = data.data.products.edges;
+    console.log(`📋 Current Shopify products: ${shopifyProducts.length}`);
+    
+    // Process Shopify products
+    const processedShopifyProducts = shopifyProducts.map(productEdge => {
+      const product = productEdge.node;
+      return {
+        ...productEdge,
+        node: {
+          ...product,
+          condition: extractConditionFromPreloved(product),
+          brand: extractBrandFromPreloved(product),
+          size: extractSizeFromPreloved(product),
+          price: extractPriceFromPreloved(product),
+          inventory: extractInventoryFromPreloved(product),
+          mainImage: extractMainImage(product)
+        }
+      };
+    });
 
-      // STEP 2: Detect changes FOR THIS STORE
-      console.log("🔍 STEP 2: Analyzing changes for current store...");
-      
-      const { titleChanges, inventoryChanges } = await detectChanges(originalDBProducts, processedShopifyProducts, storeDomain);
-      
-      // STEP 3: Sync DB → Shopify for title changes FOR THIS STORE
-      console.log("📤 STEP 3: Syncing title changes from Database to Shopify...");
-      
-      let titleSyncSuccess = 0;
-      let titleSyncErrors = 0;
-      
-      if (titleChanges.length > 0) {
-        for (const change of titleChanges) {
-          try {
-            const syncResult = await syncTitleToShopify(admin, change.dbProductId, storeDomain);
-            if (syncResult.success) {
-              titleSyncSuccess++;
-              console.log(`✅ DB → Shopify (Title) [${storeDomain}]: "${change.dbTitle}" → Shopify`);
-            } else {
-              titleSyncErrors++;
-              console.log(`❌ DB → Shopify (Title) failed [${storeDomain}]: ${change.dbTitle} - ${syncResult.error}`);
-            }
-          } catch (error) {
+    // STEP 3: Detect DB → Shopify changes (YOUR CHANGES)
+    const { titleChanges, inventoryChanges } = await detectChanges(currentDBProducts, processedShopifyProducts, storeDomain);
+    console.log(`📝 Your DB changes detected: ${titleChanges.length} titles, ${inventoryChanges.length} inventory`);
+    
+    // STEP 4: FIRST - Sync DB → Shopify (Your changes to Shopify)
+    let titleSyncSuccess = 0;
+    let titleSyncErrors = 0;
+    
+    if (titleChanges.length > 0) {
+      console.log("🔄 Sending your title changes to Shopify...");
+      for (const change of titleChanges) {
+        try {
+          const syncResult = await syncTitleToShopify(admin, change.dbProductId, storeDomain);
+          if (syncResult.success) {
+            titleSyncSuccess++;
+            console.log(`✅ Sent to Shopify: "${change.dbTitle}" → "${change.shopifyTitle}"`);
+          } else {
             titleSyncErrors++;
-            console.error(`❌ DB → Shopify (Title) error [${storeDomain}]: ${change.dbTitle} - ${error.message}`);
+            console.log(`❌ Failed: "${change.dbTitle}"`);
           }
-          
-          await new Promise(resolve => setTimeout(resolve, 50));
+        } catch (error) {
+          titleSyncErrors++;
+          console.error(`❌ Error: ${error.message}`);
         }
-      } else {
-        console.log(`🔵 No DB → Shopify title changes needed for ${storeDomain}`);
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
-      // STEP 4: Sync DB → Shopify for inventory changes FOR THIS STORE
-      console.log("📤 STEP 4: Syncing inventory changes from Database to Shopify...");
-      
-      let inventorySyncSuccess = 0;
-      let inventorySyncErrors = 0;
-      
-      if (inventoryChanges.length > 0) {
-        for (const change of inventoryChanges) {
-          try {
-            const syncResult = await syncInventoryToShopify(admin, change.dbProductId, storeDomain);
-            if (syncResult.success) {
-              inventorySyncSuccess++;
-              console.log(`✅ DB → Shopify (Inventory) [${storeDomain}]: ${change.dbInventory} → ${change.shopifyInventory}`);
-            } else {
-              inventorySyncErrors++;
-              console.log(`❌ DB → Shopify (Inventory) failed [${storeDomain}]: ${change.dbInventory} - ${syncResult.error}`);
-            }
-          } catch (error) {
-            inventorySyncErrors++;
-            console.error(`❌ DB → Shopify (Inventory) error [${storeDomain}]: ${change.dbInventory} - ${error.message}`);
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-      } else {
-        console.log(`🔵 No DB → Shopify inventory changes needed for ${storeDomain}`);
-      }
-      
-      syncResults.dbToShopify.titleSynced = titleSyncSuccess;
-      syncResults.dbToShopify.inventorySynced = inventorySyncSuccess;
-      syncResults.dbToShopify.errors = titleSyncErrors + inventorySyncErrors;
-
-      // STEP 5: Sync Shopify → Database FOR THIS STORE (with automatic table creation)
-      console.log("📥 STEP 5: Syncing from Shopify to Database with automatic table creation...");
-      
-      const saveResult = await saveProductsToAutoStoreTable(storeDomain, processedShopifyProducts);
-      syncResults.shopifyToDB = {
-        ...saveResult,
-        titleChanges: saveResult.titleChanges || 0,
-        inventoryChanges: saveResult.inventoryChanges || 0
-      };
-
-      // Get updated database stats
-      const allStores = await getAllStoresWithStats();
-      const currentStoreStats = allStores.find(store => store.name === storeDomain.replace('.myshopify.com', ''));
-
-      console.log("✅ SMART Bidirectional sync completed!");
-      console.log(`🏪 Store: ${storeDomain}`);
-      console.log(`📤 DB → Shopify: ${titleSyncSuccess} title updates, ${inventorySyncSuccess} inventory updates`);
-      console.log(`📥 Shopify → DB: ${syncResults.shopifyToDB.updated} products updated`);
-      console.log(`📊 Store Database: ${currentStoreStats?.productCount || 0} products for this store`);
-
-      return { 
-        success: true, 
-        message: `Sync completed for ${storeDomain}! 📤 ${titleSyncSuccess} titles & ${inventorySyncSuccess} inventory to Shopify | 📥 ${syncResults.shopifyToDB.updated} updates from Shopify`,
-        details: syncResults,
-        storeTable: saveResult.tableName,
-        allStores: allStores,
-        timestamp: Date.now()
-      };
-      
-    } catch (authError) {
-      console.error("❌ Action: Authentication failed:", authError.message);
-      return { 
-        success: false, 
-        message: "Session expired. Please try syncing again.",
-        timestamp: Date.now()
-      };
     }
     
-  } catch (error) {
-    console.error("❌ Bidirectional sync failed:", error.message);
+    let inventorySyncSuccess = 0;
+    let inventorySyncErrors = 0;
     
+    if (inventoryChanges.length > 0) {
+      console.log("🔄 Sending your inventory changes to Shopify...");
+      for (const change of inventoryChanges) {
+        try {
+          const syncResult = await syncInventoryToShopify(admin, change.dbProductId, storeDomain);
+          if (syncResult.success) {
+            inventorySyncSuccess++;
+            console.log(`✅ Sent to Shopify: ${change.dbInventory} → ${change.shopifyInventory}`);
+          } else {
+            inventorySyncErrors++;
+            console.log(`❌ Failed: ${change.dbInventory}`);
+          }
+        } catch (error) {
+          inventorySyncErrors++;
+          console.error(`❌ Error: ${error.message}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    
+    syncResults.dbToShopify.titleSynced = titleSyncSuccess;
+    syncResults.dbToShopify.inventorySynced = inventorySyncSuccess;
+    syncResults.dbToShopify.errors = titleSyncErrors + inventorySyncErrors;
+
+    // STEP 5: ALWAYS sync Shopify → DB (Accept ALL Shopify changes)
+    console.log("🔄 Bringing ALL Shopify changes to DB...");
+    const shopifySaveResult = await syncShopifyToDB(storeDomain, processedShopifyProducts);
+    syncResults.shopifyToDB = shopifySaveResult;
+
+    // STEP 6: Get FINAL DB data (Shopify changes are now in DB)
+    const finalDBProducts = await getProductsFromAutoStoreTable(storeDomain);
+    const allStores = await getAllStoresWithStats();
+
+    console.log("✅ Sync completed! Shopify changes are in DB.");
+    console.log(`📊 Final DB: ${finalDBProducts.length} products`);
+
+    return { 
+      success: true, 
+      message: `Sync completed! 📤 ${titleSyncSuccess} titles & ${inventorySyncSuccess} inventory to Shopify | 📥 ${shopifySaveResult.updated} Shopify updates to DB`,
+      details: syncResults,
+      products: finalDBProducts,
+      allStores: allStores,
+      timestamp: Date.now()
+    };
+    
+  } catch (error) {
+    console.error("❌ Sync failed:", error.message);
     return { 
       success: false, 
       message: `Sync failed: ${error.message}`,
@@ -456,104 +370,92 @@ export async function action({ request }) {
 
 // Client component
 export default function ProductsPage() {
-  const { products, error, currentStore, storeTable, allStores } = useLoaderData();
+  const loaderData = useLoaderData();
   const fetcher = useFetcher();
+  
+  // State to store products
+  const [products, setProducts] = useState(loaderData.products);
+  const [currentStore, setCurrentStore] = useState(loaderData.currentStore);
   
   const isSyncing = fetcher.state === "submitting";
   const syncResult = fetcher.data;
 
+  // Update UI when sync completes
+  useEffect(() => {
+    if (syncResult && syncResult.success && syncResult.products) {
+      console.log("🔄 UI updating with latest data...");
+      setProducts(syncResult.products);
+      setCurrentStore(syncResult.currentStore || currentStore);
+    }
+  }, [syncResult]);
+
+  // Update when loader data changes
+  useEffect(() => {
+    if (loaderData.products) {
+      setProducts(loaderData.products);
+      setCurrentStore(loaderData.currentStore);
+    }
+  }, [loaderData]);
+
+  // Format store name - remove .myshopify.com and capitalize
+  const formatStoreName = (store) => {
+    if (!store) return '';
+    const baseName = store.replace('.myshopify.com', '');
+    return baseName
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   // Calculate summary statistics
-  const totalProducts = products.length;
-  const excellentCondition = products.filter(p => p.product_condition === 'Excellent').length;
-  const totalInventory = products.reduce((sum, product) => sum + (product.inventory_quantity || 0), 0);
-  const outOfStock = products.filter(p => (p.inventory_quantity || 0) === 0).length;
+  const totalProducts = products?.length || 0;
+  const excellentCondition = products?.filter(p => p.product_condition === 'Excellent').length || 0;
+  const totalInventory = products?.reduce((sum, product) => sum + (product.inventory_quantity || 0), 0) || 0;
+  const outOfStock = products?.filter(p => (p.inventory_quantity || 0) === 0).length || 0;
 
   return (
     <div className="products-container">
-      {/* Header Section */}
+      {/* Header Section - Matches your image exactly */}
       <div className="products-header">
-        <div>
-          <h1 className="products-title">Preloved Products</h1>
-          <div className="products-count">
-            {totalProducts} luxury items • {isSyncing ? "Smart Syncing..." : "Smart Sync (Title + Inventory)"}
-          </div>
-          <div className="store-info">
-            {/* 🏪 Current Store: <strong>{currentStore || 'Loading...'}</strong> */}
-          </div>
-          {storeTable && (
-            <div className="store-table-info">
-              {/* 🗃️ Store Table: <strong>{storeTable}</strong> */}
+        <div className="header-content">
+          <div className="store-info-section">
+            <h1 className="app-title">Dev-App</h1>
+            <div className="store-name-display">
+              <span className="store-icon">🏪</span>
+              <span className="store-name">{formatStoreName(currentStore)}</span>
             </div>
-          )}
+          </div>
+          
+          <fetcher.Form method="post" className="sync-form">
+            <button 
+              type="submit"
+              disabled={isSyncing}
+              className={`sync-button ${isSyncing ? 'syncing' : ''}`}
+            >
+              {isSyncing ? (
+                <>
+                  <span className="sync-spinner"></span>
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <span className="sync-icon">🔄</span>
+                  Sync Data
+                </>
+              )}
+            </button>
+          </fetcher.Form>
         </div>
-        
-        {/* Bidirectional Sync Button */}
-        <fetcher.Form method="post">
-          <button 
-            type="submit"
-            disabled={isSyncing}
-            className={`sync-button ${isSyncing ? 'syncing' : ''}`}
-            title={`Smart sync for ${currentStore}`}
-          >
-            {isSyncing ? (
-              <>
-                <span className="sync-spinner"></span>
-                Smart Syncing...
-              </>
-            ) : (
-              <>
-                <span className="sync-icon">🔄</span>
-                Smart Sync
-              </>
-            )}
-          </button>
-        </fetcher.Form>
       </div>
 
-      {/* Error Message */}
-      {error && (
-        <div className="sync-message error">
-          ❌ {error}
-        </div>
+      {/* Messages */}
+      {loaderData.error && (
+        <div className="sync-message error">❌ {loaderData.error}</div>
       )}
 
-      {/* Sync Status Message */}
       {syncResult && (
         <div className={`sync-message ${syncResult.success ? 'success' : 'error'}`}>
           {syncResult.success ? '✅' : '❌'} {syncResult.message}
-          {syncResult.storeTable && (
-            <div className="sync-stats">
-              🗃️ Store Table: <strong>{syncResult.storeTable}</strong>
-            </div>
-          )}
-          {syncResult.details?.dbToShopify?.errors > 0 && ` (${syncResult.details.dbToShopify.errors} errors)`}
-        </div>
-      )}
-
-      {/* Automatic Table Creation Info Box */}
-      {/* <div className="store-separation-info">
-        <h4>✅ Automatic Table Creation: Active</h4>
-        <p>Each store has its own isolated table in the database</p>
-        <p>Current Store Table: <strong>{storeTable || 'Loading...'}</strong></p>
-      </div> */}
-
-      {/* All Stores Section */}
-      {allStores && allStores.length > 0 && (
-        <div className="all-stores-section">
-          {/* <h3>📊 All Stores in Database</h3> */}
-          <div className="stores-grid">
-            {allStores.map(store => (
-              <div key={store.name} className={`store-card ${store.name === currentStore?.replace('.myshopify.com', '') ? 'current-store' : ''}`}>
-                {/* <h4>{store.name}</h4>
-                <p>Products: {store.productCount}</p>
-                <p>Inventory: {store.totalInventory}</p>
-                <p>Table: {store.tableName}</p> */}
-                {store.name === currentStore?.replace('.myshopify.com', '') && (
-                  <div className="current-store-badge">Current</div>
-                )}
-              </div>
-            ))}
-          </div>
         </div>
       )}
 
@@ -562,12 +464,12 @@ export default function ProductsPage() {
         <div className="summary-card">
           <h3>Total Items</h3>
           <p className="value">{totalProducts}</p>
-          <small>In this store</small>
+          <small>In database</small>
         </div>
         <div className="summary-card">
           <h3>Total Inventory</h3>
           <p className="value">{totalInventory}</p>
-          <small>This store's stock</small>
+          <small>Database stock</small>
         </div>
         <div className="summary-card">
           <h3>Excellent Condition</h3>
@@ -592,20 +494,16 @@ export default function ProductsPage() {
               <th>Condition</th>
               <th>Price</th>
               <th>Inventory</th>
-              <th>Store Table</th>
+              <th>Last Updated</th>
             </tr>
           </thead>
           <tbody>
-            {products.map((product) => (
+            {products && products.map((product) => (
               <tr key={product.id} className="product-row">
                 <td className="product-info-cell">
                   <div className="product-info">
                     {product.image_url && (
-                      <img 
-                        src={product.image_url} 
-                        alt={product.title}
-                        className="product-thumbnail"
-                      />
+                      <img src={product.image_url} alt={product.title} className="product-thumbnail" />
                     )}
                     <div className="product-text-info">
                       <div className="product-title-table">{product.title}</div>
@@ -617,30 +515,22 @@ export default function ProductsPage() {
                     </div>
                   </div>
                 </td>
-                <td>
-                  <span className="brand-value">{product.brand}</span>
-                </td>
-                <td>
-                  <span className="size-value">{product.size}</span>
-                </td>
+                <td><span className="brand-value">{product.brand}</span></td>
+                <td><span className="size-value">{product.size}</span></td>
                 <td>
                   <span className={`condition-badge ${product.product_condition?.toLowerCase().replace(' ', '-')}`}>
                     {product.product_condition}
                   </span>
                 </td>
-                <td>
-                  <span className="price-value-table">
-                    {formatPrice(product.price)}
-                  </span>
-                </td>
+                <td><span className="price-value-table">{formatPrice(product.price)}</span></td>
                 <td>
                   <span className={`inventory-badge ${(product.inventory_quantity || 0) > 0 ? 'in-stock' : 'out-of-stock'}`}>
                     {product.inventory_quantity || 0}
                   </span>
                 </td>
                 <td>
-                  <span className="store-badge">
-                    {storeTable || 'store_...'}
+                  <span className="update-time">
+                    {product.updated_at ? new Date(product.updated_at).toLocaleDateString() : 'N/A'}
                   </span>
                 </td>
               </tr>
@@ -648,10 +538,10 @@ export default function ProductsPage() {
           </tbody>
         </table>
 
-        {products.length === 0 && (
+        {(!products || products.length === 0) && (
           <div className="empty-state">
-            <h3>No products found for {currentStore}</h3>
-            <p>Click "Smart Sync" to import products from your Shopify store.</p>
+            <h3>No products found for {formatStoreName(currentStore)}</h3>
+            <p>Click "Sync Data" to import products from Shopify.</p>
           </div>
         )}
       </div>

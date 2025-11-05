@@ -7,46 +7,64 @@
   min-height: 100vh;
 }
 
-/* Header Section */
+/* Header Section - Updated to match your image */
 .products-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  padding: 24px;
   background: white;
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   border: 1px solid #e1e3e5;
+  margin-bottom: 24px;
+  overflow: hidden;
 }
 
-.products-title {
-  font-size: 28px;
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.store-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.app-title {
+  font-size: 24px;
   font-weight: 700;
   color: #202223;
   margin: 0;
+  line-height: 1.2;
 }
 
-.products-count {
-  font-size: 16px;
-  color: #6d7175;
-  margin-top: 4px;
+.store-name-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
 }
 
-.store-info {
-  font-size: 14px;
-  color: #6d7175;
-  margin-top: 4px;
+.store-icon {
+  font-size: 20px;
 }
 
-.store-table-info {
-  font-size: 14px;
-  color: #3b82f6;
-  margin-top: 4px;
+.store-name {
+  font-size: 18px;
   font-weight: 600;
+  color: #6d7175;
+  margin: 0;
 }
 
-/* Simple Sync Button - Matching Summary Cards */
+.sync-form {
+  flex-shrink: 0;
+}
+
+/* Sync Button - Updated to match your image */
 .sync-button {
   background: white;
   color: #dc2626;
@@ -65,6 +83,8 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   position: relative;
   overflow: hidden;
+  min-width: 140px;
+  justify-content: center;
 }
 
 .sync-button::before {
@@ -78,8 +98,8 @@
 }
 
 .sync-button:hover:not(:disabled) {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
   color: #dc2626;
 }
 
@@ -125,7 +145,7 @@
   100% { transform: rotate(360deg); }
 }
 
-/* Popup Sync Message - Appears for 2 seconds then disappears */
+/* Sync Messages */
 .sync-message {
   position: fixed;
   top: 20px;
@@ -157,16 +177,6 @@
   border: 1px solid #fecaca;
 }
 
-.sync-stats {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
-  font-size: 12px;
-  font-weight: 400;
-  opacity: 0.8;
-}
-
-/* Popup Animations */
 @keyframes slideIn {
   from {
     transform: translateX(100%);
@@ -189,91 +199,7 @@
   }
 }
 
-/* Store Separation Info */
-.store-separation-info {
-  background: rgba(139, 92, 246, 0.1);
-  color: #5b21b6;
-  padding: 16px;
-  border-radius: 8px;
-  border: 1px solid #a78bfa;
-  margin-bottom: 20px;
-}
-
-.store-separation-info h4 {
-  margin: 0 0 8px 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.store-separation-info p {
-  margin: 4px 0;
-  font-size: 14px;
-  opacity: 0.9;
-}
-
-/* All Stores Section */
-/* .all-stores-section {
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e1e3e5;
-  margin-bottom: 20px;
-}
-
-.all-stores-section h3 {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #202223;
-} */
-
-.stores-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 16px;
-}
-
-.store-card {
-  background: #f8f9fa;
-  padding: 16px;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-  position: relative;
-}
-
-.store-card.current-store {
-  background: rgba(59, 130, 246, 0.1);
-  border-color: #3b82f6;
-}
-
-.store-card h4 {
-  margin: 0 0 8px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #202223;
-}
-
-.store-card p {
-  margin: 4px 0;
-  font-size: 14px;
-  color: #6d7175;
-}
-
-.current-store-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: #3b82f6;
-  color: white;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-/* Summary Cards with Sequential Animations */
-/* Summary Cards with Delayed Sequential Animations */
+/* Summary Cards */
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -290,9 +216,6 @@
   transition: all 0.3s ease;
   position: relative;
   overflow: hidden;
-  opacity: 0;
-  transform: translateY(30px);
-  animation: cardSlideIn 0.6s ease forwards;
 }
 
 .summary-card::before {
@@ -310,10 +233,8 @@
   cursor: pointer;
 }
 
-/* Sequential Animation Delays with 2-second base delay */
 .summary-card:nth-child(1) {
   border-left: 4px solid #10b981;
-  animation-delay: 4.5s; /* 2s + 0.1s */
 }
 .summary-card:nth-child(1)::before { background: linear-gradient(90deg, #10b981, #34d399); }
 .summary-card:nth-child(1) .value,
@@ -321,7 +242,6 @@
 
 .summary-card:nth-child(2) {
   border-left: 4px solid #3b82f6;
-  animation-delay: 5.0s; /* 2s + 0.3s */
 }
 .summary-card:nth-child(2)::before { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
 .summary-card:nth-child(2) .value,
@@ -329,7 +249,6 @@
 
 .summary-card:nth-child(3) {
   border-left: 4px solid #8b5cf6;
-  animation-delay: 5.5s; /* 2s + 0.5s */
 }
 .summary-card:nth-child(3)::before { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
 .summary-card:nth-child(3) .value,
@@ -337,23 +256,10 @@
 
 .summary-card:nth-child(4) {
   border-left: 4px solid #f59e0b;
-  animation-delay: 6.0s; /* 2s + 0.7s */
 }
 .summary-card:nth-child(4)::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
 .summary-card:nth-child(4) .value,
 .summary-card:nth-child(4) h3 { color: #f59e0b; }
-
-/* Card Animation */
-@keyframes cardSlideIn {
-  0% {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 .summary-card h3 {
   font-size: 14px;
@@ -487,15 +393,6 @@
 }
 
 /* Table Cells */
-.brand-cell,
-.size-cell,
-.condition-cell,
-.price-cell,
-.inventory-cell {
-  font-size: 13px;
-  font-weight: 500;
-}
-
 .brand-value {
   padding: 4px 8px;
   background: #f8f9fa;
@@ -571,36 +468,6 @@
   border: 1px solid #d1d5db;
 }
 
-.condition-new {
-  background: #dbeafe;
-  color: #1e40af;
-  border: 1px solid #93c5fd;
-}
-
-.condition-used {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
-}
-
-.condition-like-new {
-  background: #d1fae5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
-}
-
-.condition-mint {
-  background: #d1fae5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
-}
-
-.condition-pristine {
-  background: #d1fae5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
-}
-
 /* Price Cell */
 .price-value-table {
   font-size: 14px;
@@ -640,32 +507,12 @@
   border: 1px solid #fecaca;
 }
 
-.low-stock {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
-}
-
-/* Store Badge */
-.store-badge {
-  padding: 4px 8px;
-  background: #f3f4f6;
-  color: #6b7280;
-  border-radius: 6px;
-  font-size: 11px;
+/* Update Time */
+.update-time {
+  font-size: 12px;
+  color: #6c757d;
   font-weight: 500;
-  border: 1px solid #d1d5db;
-  display: inline-block;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-
-/* Text Alignment */
-.text-left { text-align: left; }
-.text-center { text-align: center; }
-.text-right { text-align: right; }
 
 /* Empty State */
 .empty-state {
@@ -688,42 +535,52 @@
   margin-bottom: 20px;
 }
 
-/* Responsive Design */
+/* ===== RESPONSIVE DESIGN ===== */
+
+/* Large Tablets and Small Laptops (1024px and below) */
 @media (max-width: 1024px) {
+  .products-container {
+    padding: 16px;
+  }
+  
   .products-table-container {
     overflow-x: auto;
   }
   
   .products-table {
-    min-width: 800px;
+    min-width: 900px;
     table-layout: auto;
+  }
+  
+  .header-content {
+    padding: 20px;
   }
 }
 
+/* Tablets (768px and below) */
 @media (max-width: 768px) {
   .products-container {
+    padding: 12px;
+  }
+  
+  .header-content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
     padding: 16px;
   }
   
-  .products-header {
-    padding: 20px;
-    flex-direction: column;
-    gap: 16px;
-    align-items: flex-start;
+  .store-info-section {
+    text-align: center;
   }
   
-  .products-title {
-    font-size: 24px;
-  }
-  
-  .products-count {
-    font-size: 14px;
+  .store-name-display {
+    justify-content: center;
   }
   
   .sync-button {
-    align-self: flex-start;
-    padding: 14px 20px;
-    font-size: 14px;
+    width: 100%;
+    justify-content: center;
   }
   
   .summary-cards {
@@ -761,55 +618,54 @@
     font-size: 11px;
   }
   
-  .inventory-badge {
-    min-width: 40px;
-    font-size: 11px;
-  }
-  
-  .condition-badge {
-    min-width: 70px;
-    font-size: 10px;
-    padding: 4px 8px;
-  }
-  
-  .price-value-table {
-    min-width: 80px;
-    font-size: 12px;
-    padding: 4px 8px;
-  }
-  
   .sync-message {
     top: 10px;
     right: 10px;
     left: 10px;
     max-width: none;
+    font-size: 13px;
+    padding: 12px 16px;
   }
 }
 
+/* Mobile Devices (480px and below) */
 @media (max-width: 480px) {
   .products-container {
+    padding: 8px;
+  }
+  
+  .header-content {
     padding: 12px;
+  }
+  
+  .app-title {
+    font-size: 20px;
+  }
+  
+  .store-name {
+    font-size: 16px;
   }
   
   .summary-cards {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
   
-  .products-header {
+  .summary-card {
     padding: 16px;
   }
   
-  .products-title {
-    font-size: 20px;
+  .summary-card .value {
+    font-size: 24px;
   }
   
-  .products-count {
+  .summary-card h3 {
     font-size: 13px;
   }
   
   .sync-button {
-    padding: 12px 16px;
-    font-size: 13px;
+    padding: 14px 20px;
+    font-size: 14px;
   }
   
   .products-table th,
@@ -829,6 +685,15 @@
   .price-value-table,
   .inventory-badge {
     font-size: 10px;
+    padding: 4px 6px;
+  }
+  
+  .condition-badge {
+    min-width: 60px;
+  }
+  
+  .price-value-table {
+    min-width: 80px;
   }
   
   .empty-state {
@@ -841,5 +706,58 @@
   
   .empty-state p {
     font-size: 13px;
+  }
+}
+
+/* Small Mobile Devices (360px and below) */
+@media (max-width: 360px) {
+  .products-container {
+    padding: 6px;
+  }
+  
+  .header-content {
+    padding: 10px;
+  }
+  
+  .app-title {
+    font-size: 18px;
+  }
+  
+  .store-name {
+    font-size: 14px;
+  }
+  
+  .summary-card {
+    padding: 12px;
+  }
+  
+  .summary-card .value {
+    font-size: 20px;
+  }
+  
+  .sync-button {
+    padding: 12px 16px;
+    font-size: 13px;
+  }
+  
+  .products-table th,
+  .products-table td {
+    padding: 6px 4px;
+    font-size: 11px;
+  }
+  
+  .product-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  
+  .product-thumbnail {
+    width: 30px;
+    height: 30px;
+  }
+  
+  .product-title-table {
+    font-size: 12px;
   }
 }
