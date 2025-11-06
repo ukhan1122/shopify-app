@@ -5,9 +5,8 @@ name = "Smart Product Sync"
 application_url = "https://presence-depth-barrier-minority.trycloudflare.com"
 embedded = true
 
-# ⬇️ ADDED PROPER DESCRIPTION & PRIVACY POLICY
+# ⬇️ PROPER DESCRIPTION (PRIVACY POLICY REMOVED)
 description = "Efficiently manage and sync your product catalog with real-time inventory tracking, bulk product updates, and automated product management tools."
-privacy_policy_url = "https://your-domain.com/privacy"  # ⚠️ You need to create this!
 
 [build]
 automatically_update_urls_on_dev = true
