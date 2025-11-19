@@ -7,6 +7,10 @@ embedded = true
 
 description = "Efficiently manage and sync your product catalog with real-time inventory tracking, bulk product updates, and automated product management tools."
 
+# ↓↓↓ ADD THESE TWO LINES ↓↓↓
+privacy_policy_url = "https://ukhan1122.github.io/shopify-app/privacy-policy.html"
+terms_of_service_url = "https://ukhan1122.github.io/shopify-app/terms-of-service.html"
+
 [build]
 automatically_update_urls_on_dev = true
 include_config_on_deploy = true
