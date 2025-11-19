@@ -1,11 +1,10 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration    
 
 client_id = "e7cbfeaa2eff5887c175d3cc3ce89e6b"
 name = "Smart Product Sync"
-application_url = "https://presence-depth-barrier-minority.trycloudflare.com"
+application_url = "https://presence-depth-barrier-minority.trycloudflare.com" # ← CHANGE TO REAL DOMAIN
 embedded = true
 
-# ⬇️ PROPER DESCRIPTION (PRIVACY POLICY REMOVED)
 description = "Efficiently manage and sync your product catalog with real-time inventory tracking, bulk product updates, and automated product management tools."
 
 [build]
@@ -13,7 +12,7 @@ automatically_update_urls_on_dev = true
 include_config_on_deploy = true
 
 [webhooks]
-api_version = "2026-01"
+api_version = "2024-01"  # ← USE STABLE VERSION
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
@@ -32,12 +31,11 @@ api_version = "2026-01"
   uri = "/webhooks/products/update"
 
 [access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_inventory,read_inventory,read_locations,read_products,write_products"
+scopes = "write_inventory,read_inventory,read_locations,read_products,write_products,read_orders" # ← ADD read_orders
 optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://presence-depth-barrier-minority.trycloudflare.com/api/auth"
+  "https://presence-depth-barrier-minority.trycloudflare.com/api/auth" # ← CHANGE TO REAL DOMAIN
 ]

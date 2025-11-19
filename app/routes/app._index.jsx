@@ -3,11 +3,25 @@ import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import { trackInstallFromSession } from "../services/shopify/shopifyInstallService"; // Add this
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
 
-  return null;
+  // 🎯 ADD API CALL HERE - This is the page that loads!
+  console.log('🚀 Home page loader - tracking installation for:', session.shop);
+  const trackResult = await trackInstallFromSession(session);
+  
+  if (trackResult.success) {
+    console.log('✅ Installation tracked successfully from home page');
+  } else {
+    console.error('❌ Installation tracking failed:', trackResult.error);
+  }
+
+  return { 
+    installationTracked: trackResult.success,
+    shop: session.shop 
+  };
 };
 
 export const action = async ({ request }) => {
@@ -87,6 +101,7 @@ export default function Index() {
       shopify.toast.show("Product created");
     }
   }, [fetcher.data?.product?.id, shopify]);
+  
   const generateProduct = () => fetcher.submit({}, { method: "POST" });
 
   return (

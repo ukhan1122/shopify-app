@@ -2,18 +2,45 @@ import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
+import { trackInstallFromSession } from "../services/shopify/index";
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
 
-  // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  // Only track install - NO AUTOMATIC SYNC OPERATIONS
+  const trackResult = await trackInstallFromSession(session);
+  
+  let userId = null;
+  
+  if (trackResult.success) {
+    userId = trackResult.data.user_id;
+    
+    // Only store basic shop info - no heavy operations
+    try {
+      const { db } = await import("@shopify/shopify-app-remix/server");
+      
+      await db.query(
+        `UPDATE users SET shopify_store_url = ? WHERE id = ?`,
+        [session.shop, userId]
+      );
+    } catch (dbError) {
+      console.error('Failed to store user-shop mapping:', dbError);
+    }
+  }
+
+  return { 
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    installationTracked: trackResult.success,
+    shop: session.shop,
+    userId: userId
+    // REMOVED: All the sync result flags
+  };
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData();
+  const { apiKey, shop } = useLoaderData();
 
-  return (  // ✅ ADD THIS 'return' STATEMENT!
+  return (
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
         <s-link href="/app">Home</s-link>
@@ -25,7 +52,6 @@ export default function App() {
   );
 }
 
-// Shopify needs React Router to catch some thrown responses, so that their headers are included in the response.
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }
