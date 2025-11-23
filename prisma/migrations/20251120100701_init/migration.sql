@@ -1,0 +1,4 @@
+-- CreateTable
+CREATE TABLE "Dummy" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT
+);

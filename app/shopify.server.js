@@ -1,10 +1,16 @@
 import "@shopify/shopify-app-react-router/adapters/node";
+import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+import { PrismaClient } from '@prisma/client';
 import {
   ApiVersion,
   AppDistribution,
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
-import { MemorySessionStorage } from "@shopify/shopify-app-session-storage-memory";
+
+console.log('🛠️ Shopify server initializing...');
+
+// ✅ Initialize Prisma client
+const prisma = new PrismaClient();
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -12,21 +18,43 @@ const shopify = shopifyApp({
   apiVersion: ApiVersion.January25,
   scopes: [
     "read_products",
-    "write_products", 
+    "write_products",
     "read_inventory",
-    "write_inventory", // ← ADD THIS
+    "write_inventory",
     "read_locations",
-    "read_orders"      // ← ADD THIS
+    "read_orders",
   ],
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: new MemorySessionStorage(),
+
+  // ✅ Pass the instantiated Prisma client
+  sessionStorage: new PrismaSessionStorage(prisma),
+
   distribution: AppDistribution.AppStore,
   isEmbeddedApp: true,
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
 });
+
+// ✅ ADD THIS FUNCTION HERE (Shopify auth utility)
+export function loginErrorMessage(loginResult) {
+  if (!loginResult) {
+    return {};
+  }
+
+  const { shop, host, ...errors } = loginResult;
+
+  if (errors.shop) {
+    return { shop: errors.shop };
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return errors;
+  }
+
+  return {};
+}
 
 export default shopify;
 export const apiVersion = ApiVersion.January25;

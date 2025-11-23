@@ -1,19 +1,24 @@
 import { redirect, Form, useLoaderData } from "react-router";
-import { login } from "../../shopify.server";
+import { login } from "../../shopify.server"; // ← FIXED IMPORT PATH
 import styles from "./styles.module.css";
 
 export const loader = async ({ request }) => {
+  console.log('🏠 Index loader - Landing page');
   const url = new URL(request.url);
 
   if (url.searchParams.get("shop")) {
+    const shop = url.searchParams.get("shop");
+    console.log('🔄 Index - Redirecting to app with shop:', shop);
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
   return { showForm: Boolean(login) };
 };
 
-export default function App() {
+export default function Index() {
   const { showForm } = useLoaderData();
+  
+  console.log('🏠 Index component rendered - showForm:', showForm);
 
   return (
     <div className={styles.index}>

@@ -1,5 +1,4 @@
 import { authenticate } from "../shopify.server";
-import { ShopifyProductService } from '../services/shopify/shopifyProductService';
 
 export const action = async ({ request }) => {
   try {
@@ -11,7 +10,7 @@ export const action = async ({ request }) => {
 
     console.log("🔄 Product update webhook received for:", shop);
     
-    // Extract product ID from webhook payload
+    // Get the product ID from webhook
     const productId = payload.admin_graphql_api_id || payload.id;
     
     if (!productId) {
@@ -21,74 +20,40 @@ export const action = async ({ request }) => {
 
     console.log(`📦 Processing updated product: ${productId}`);
 
-    // Get the updated product details from Shopify API
-    const productResponse = await admin.graphql(`
-      #graphql
-      query GetProduct($id: ID!) {
-        product(id: $id) {
-          id
-          title
-          description
-          vendor
-          tags
-          totalInventory
-          featuredImage { url }
-          variants(first: 5) {
-            edges {
-              node {
-                id
-                inventoryQuantity
-                selectedOptions { name value }
-              }
-            }
-          }
-          priceRange {
-            minVariantPrice { amount currencyCode }
-          }
-        }
-      }
-    `, {
-      variables: { id: productId }
+    // Send comprehensive data to backend
+    const backendResponse = await fetch('http://depop-backend.test/api/v1/shopify/webhook/product-update', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        shop_domain: shop,
+        product_id: productId,
+        title: payload.title || 'Unknown Product',
+        quantity: payload.variants?.[0]?.inventory_quantity || 0,
+        variants: payload.variants || [],
+        handle: payload.handle,
+        product_type: payload.product_type,
+        status: payload.status,
+        updated_at: payload.updated_at || new Date().toISOString()
+      })
     });
 
-    const productData = await productResponse.json();
-    
-    if (productData.errors) {
-      console.error("❌ GraphQL error:", productData.errors);
-      throw new Error(`GraphQL error: ${JSON.stringify(productData.errors)}`);
+    if (!backendResponse.ok) {
+      const errorText = await backendResponse.text();
+      console.error('❌ Backend sync failed:', errorText);
+      
+      // Don't throw error - return 200 to prevent webhook retries
+      // Shopify will retry webhooks that return non-200 status
+      return new Response("Webhook processed", { status: 200 });
     }
 
-    const updatedProduct = productData.data.product;
+    const syncResult = await backendResponse.json();
     
-    if (!updatedProduct) {
-      console.error("❌ Product not found in Shopify");
-      return new Response("Product not found", { status: 404 });
-    }
-
-    console.log(`✅ Retrieved updated product: ${updatedProduct.title}`);
-
-    // Transform and sync to backend
-    const transformedProduct = ShopifyProductService.transformProductsForBackend([updatedProduct])[0];
-    
-    // Calculate actual inventory from variants
-    const inventory = updatedProduct.variants?.edges?.reduce((sum, variant) => 
-      sum + (parseInt(variant.node.inventoryQuantity) || 0), 0) || 0;
-    
-    transformedProduct.quantity = inventory;
-
-    // Sync single product to backend
-    const syncResult = await ShopifyProductService.syncProductsToBackend(
-      shop,
-      [transformedProduct],
-      // Note: You might need to get the access token differently for webhooks
-      // This might require storing tokens in your database
-      process.env.BACKEND_API_TOKEN // Fallback for webhooks
-    );
-
     if (syncResult.success) {
-      console.log(`✅ Successfully synced product to backend: ${updatedProduct.title}`);
+      console.log(`✅ Successfully synced product to backend: ${productId}`);
     } else {
-      console.error(`❌ Failed to sync product to backend: ${syncResult.message}`);
+      console.warn(`⚠️ Backend sync issue: ${syncResult.message}`);
     }
 
     return new Response("Webhook processed successfully", { status: 200 });
@@ -97,7 +62,6 @@ export const action = async ({ request }) => {
     console.error("💥 Webhook processing failed:", error);
     
     // Return 200 to prevent webhook retries for non-critical errors
-    // Shopify will retry on 4xx/5xx status codes
-    return new Response("Webhook processing failed", { status: 200 });
+    return new Response("Webhook processed", { status: 200 });
   }
 };

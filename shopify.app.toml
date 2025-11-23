@@ -1,15 +1,16 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration    
 
-client_id = "e7cbfeaa2eff5887c175d3cc3ce89e6b"
+client_id = "d5430acfa212b8093c05dc868984ee34"
 name = "Smart Product Sync"
-application_url = "https://presence-depth-barrier-minority.trycloudflare.com" # ← CHANGE TO REAL DOMAIN
+application_url = "https://resumes-setup-clients-courtesy.trycloudflare.com"
+
 embedded = true
 
 description = "Efficiently manage and sync your product catalog with real-time inventory tracking, bulk product updates, and automated product management tools."
 
 # ↓↓↓ ADD THESE TWO LINES ↓↓↓
-privacy_policy_url = "https://ukhan1122.github.io/shopify-app/privacy-policy.html"
-terms_of_service_url = "https://ukhan1122.github.io/shopify-app/terms-of-service.html"
+#privacy_policy_url = "https://ukhan1122.github.io/shopify-app/privacy-policy.html"
+#terms_of_service_url = "https://ukhan1122.github.io/shopify-app/terms-of-service.html"
 
 [build]
 automatically_update_urls_on_dev = true
@@ -34,6 +35,8 @@ api_version = "2024-01"  # ← USE STABLE VERSION
   topics = [ "products/update" ]
   uri = "/webhooks/products/update"
 
+
+commands = { dev = "npm run dev -- --verbose" }
 [access_scopes]
 scopes = "write_inventory,read_inventory,read_locations,read_products,write_products,read_orders" # ← ADD read_orders
 optional_scopes = [ ]
@@ -41,5 +44,5 @@ use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://presence-depth-barrier-minority.trycloudflare.com/api/auth" # ← CHANGE TO REAL DOMAIN
+  "https://resumes-setup-clients-courtesy.trycloudflare.com/api/auth/callback"
 ]
