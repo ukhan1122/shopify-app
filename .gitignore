@@ -1,31 +1,29 @@
-# Environment files
+# Environment Configuration
 .env
-.env.* 
+.env.*
 
-# Dependencies
-node_modules/
+# Dependency directory
+node_modules
 
-# Build output
-dist/
-build/
+# Test coverage directory
+coverage
+
+# Ignore Apple macOS Desktop Services Store
+.DS_Store
 
 # Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+logs
 *.log
 
-# Shopify dev files
-.shopify/
+# extensions build output
+extensions/*/build
+extensions/*/dist
+
+# lock files
+
+
+
+
+# Ignore shopify files created during app dev
+.shopify/*
 .shopify.lock
-extensions/*/build/
-extensions/*/dist/
-
-# Prisma
-prisma/dev.db
-prisma/dev.db-journal
-
-# OS generated files
-.DS_Store
-Thumbs.db

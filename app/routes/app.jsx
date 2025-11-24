@@ -1,85 +1,126 @@
-import { Outlet, useLoaderData, useRouteError, redirect, Link } from "react-router";
+import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 
-export const loader = async ({ request }) => {
-  console.log('🔄 App loader started - URL:', request.url);
-  
+let sessionCache = new Map(); // ✅ Cache by shop
+
+export async function loader({ request }) {
   const url = new URL(request.url);
-  const pathname = url.pathname;
-  const shop = url.searchParams.get('shop');
+  const shopParam = url.searchParams.get('shop');
+  
+  console.log('🔍 App loader - Called for shop:', shopParam);
+  
+  // ✅ Return cached data for this specific shop
+  if (sessionCache.has(shopParam)) {
+    console.log('🔍 App loader - Returning cached data for shop:', shopParam);
+    return sessionCache.get(shopParam);
+  }
 
-  console.log('🔍 App loader details:', { pathname, shop });
-
-  // ✅ FIXED: Always authenticate to get the admin instance
   try {
-    const { admin, session } = await authenticate.admin(request);
-
-    console.log('✅ Session found in app loader:', {
+    console.log('🔍 App loader - Starting authentication for shop:', shopParam);
+    
+    const { session } = await authenticate.admin(request);
+    
+    console.log('🔍 App loader - Authentication successful:', {
       shop: session?.shop,
+      hasSession: !!session
     });
 
-    // ✅ AUTO-CREATE USER: Add this line
-    await autoCreateUserInDatabase(session.shop);
-
-    return {
+    // ✅ Cache data for this specific shop
+    const result = {
       apiKey: process.env.SHOPIFY_API_KEY || "",
       shop: session.shop,
-      admin: admin // ✅ Pass admin instance to child routes
     };
+    
+    sessionCache.set(session.shop, result);
+    console.log('🔍 App loader - Cached data for shop:', session.shop);
 
+    // ✅ FIXED: PASS THE FULL SESSION OBJECT, NOT JUST session.shop
+    await autoCreateUserInDatabase(session);
+
+    return result;
+    
   } catch (error) {
-    console.log('❌ App loader session error:', error.message);
-
-    // Redirect to auth if authentication fails
-    if (shop) {
-      console.log('🔀 Redirecting to auth with shop:', shop);
-      throw redirect(`/auth/login?shop=${shop}`);
+    console.error('❌ App loader error:', error);
+    
+    if (error instanceof Response && error.status === 302) {
+      console.log('🔄 App loader - Handling 302 redirect');
+      sessionCache.delete(shopParam); // Clear cache for this shop
+      throw error;
     }
-
-    console.log('🔀 Redirecting to general auth');
-    throw redirect('/auth/login');
+    
+    const fallback = {
+      apiKey: "ERROR_FALLBACK",
+      shop: shopParam || "error.myshopify.com",
+      error: error.message
+    };
+    
+    return fallback;
   }
-};
+}
 
-// ✅ ADD THIS FUNCTION: Auto-create users during installation
-async function autoCreateUserInDatabase(shop) {
+// ✅ CORRECTED AUTO-CREATE FUNCTION (WITH TOKEN SUPPORT)
+async function autoCreateUserInDatabase(session) {
   try {
-    if (!shop) {
-      console.log('❌ No shop provided for user creation');
+    if (!session?.shop) {
+      console.log('❌ Auto-create: No session or shop provided');
       return;
     }
 
-    console.log('🔄 Auto-creating user for shop:', shop);
-
-    // ✅ FIXED: Use the correct URL with 'oauth' path
-    const response = await fetch(`http://depop-backend.test/api/v1/shopify/oauth/auto-create-user`, {
+    console.log('🔄 Starting auto-create for shop:', session.shop);
+    console.log('🔑 Auto-create - Token preview:', session.accessToken?.substring(0, 20) + '...');
+    
+    const url = `http://depop-backend.test/api/v1/shopify/oauth/auto-create-user`;
+    console.log('📡 Auto-create: Calling URL:', url);
+    
+    const response = await fetch(url, {
       method: 'POST',
-      headers: {
+      headers: { 
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${session.accessToken}`, // ✅ TOKEN IN HEADER
+        'X-Shop-Domain': session.shop // ✅ SHOP DOMAIN IN HEADER
       },
-      body: JSON.stringify({
-        shop_domain: shop
+      body: JSON.stringify({ 
+        shop_domain: session.shop,
+        access_token: session.accessToken // ✅ ALSO IN BODY FOR BACKWARDS COMPATIBILITY
       })
     });
 
+    console.log('📊 Auto-create response status:', response.status);
+    console.log('📊 Auto-create response ok:', response.ok);
+    
     if (response.ok) {
       const data = await response.json();
-      console.log('✅ User auto-created in database:', data);
+      console.log('✅ Auto-create SUCCESS:', data);
     } else {
-      console.error('❌ Failed to auto-create user:', await response.text());
+      const errorText = await response.text();
+      console.error('❌ Auto-create FAILED - Status:', response.status);
+      console.error('❌ Auto-create Error response:', errorText);
+      
+      // Check if endpoint doesn't exist
+      if (response.status === 404) {
+        console.error('❌ ENDPOINT NOT FOUND: The auto-create-user endpoint does not exist in your Laravel backend!');
+        console.error('💡 You can remove the autoCreateUserInDatabase call if this endpoint is not needed');
+      }
     }
-
   } catch (error) {
-    console.error('❌ Error auto-creating user:', error.message);
+    console.error('❌ Auto-create NETWORK ERROR:', error.message);
+    
+    // Check if backend is reachable
+    if (error.message.includes('fetch failed') || error.message.includes('NetworkError')) {
+      console.error('❌ BACKEND UNREACHABLE: Cannot connect to http://depop-backend.test');
+    }
   }
 }
 
 export default function App() {
-  const { apiKey, shop, admin } = useLoaderData();
+  const loaderData = useLoaderData();
 
-  console.log("🏠 App rendered for shop:", shop);
+  console.log('🔍 App component - Loader data received:', loaderData);
+
+  const { apiKey = "DEFAULT_API_KEY", shop = "DEFAULT_SHOP" } = loaderData || {};
 
   return (
     <AppProvider
@@ -87,30 +128,7 @@ export default function App() {
       apiKey={apiKey}
       shopOrigin={`https://${shop}`}
     >
-      {/* 🧭 Simple navigation */}
-      <nav style={{
-        padding: "20px",
-        background: "#f5f5f5",
-        borderBottom: "1px solid #ddd",
-        marginBottom: "15px"
-      }}>
-        <Link
-          to="/app"
-          style={{ marginRight: "20px", textDecoration: "none", color: "#333" }}
-        >
-          Dashboard
-        </Link>
-
-        <Link
-          to="/app/products"
-          style={{ textDecoration: "none", color: "#333" }}
-        >
-          Products
-        </Link>
-      </nav>
-
-      {/* 🧭 Render child routes with admin context */}
-      <Outlet context={{ admin, shop }} />
+      <Outlet />
     </AppProvider>
   );
 }

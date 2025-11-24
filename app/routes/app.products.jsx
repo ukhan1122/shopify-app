@@ -1,216 +1,167 @@
 import { useLoaderData, useFetcher } from "react-router-dom";
 import { useState, useEffect } from 'react';
+import { authenticate } from "../shopify.server";
 import '../styles/Productlist.css';
 
-// ✅ Helper function to build correct API URL
+// Helper function to build correct API URL
 function buildApiUrl(endpoint, shop = null) {
   let backendUrl = process.env.BACKEND_URL || 'http://depop-backend.test/api';
-  
-  // ✅ Remove trailing slash if present
   backendUrl = backendUrl.replace(/\/$/, '');
   
-  // ✅ Build the full URL
   let apiUrl = `${backendUrl}/v1/shopify/${endpoint}`;
   
-  // ✅ Add shop_domain parameter if provided (your Laravel expects shop_domain, not shop)
   if (shop) {
     apiUrl += `?shop_domain=${shop}`;
   }
   
-  console.log('🔗 Built API URL:', apiUrl);
   return apiUrl;
 }
 
-// ✅ Loader calls YOUR LARAVEL BACKEND API
+// ✅ CORRECTED LOADER WITH AUTHENTICATION HEADERS
 export const loader = async ({ request }) => {
-  console.log('📦 Products loader - LOADING FROM LARAVEL BACKEND');
-
-  const url = new URL(request.url);
-  const shop = url.searchParams.get('shop');
-
-  console.log('✅ Loading products for shop:', shop);
-
   try {
-    // ✅ Use the helper function to build correct URL
-    const apiUrl = buildApiUrl('products', shop);
-    
-    console.log('🔄 Calling Laravel backend:', apiUrl);
-    
-    const response = await fetch(apiUrl);
-    
-    console.log('📡 Response status:', response.status, response.statusText);
-    
-    if (!response.ok) {
-      // ✅ Try to get JSON error first, then fall back to text
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch (e) {
-        errorData = await response.text();
-      }
+    // ✅ GET SESSION FOR SHOP DOMAIN AND TOKEN
+    const { session } = await authenticate.admin(request);
+    const shop = session.shop;
+    const accessToken = session.accessToken;
+
+    console.log('🔑 Loader - Token preview:', accessToken?.substring(0, 20) + '...');
+    console.log('🏪 Loader - Shop:', shop);
+
+    if (!shop || !accessToken) {
+      throw new Error('No shop domain or access token available in loader');
+    }
+
+    try {
+      const apiUrl = buildApiUrl('products', shop);
+      console.log('📡 Loader - Calling backend API:', apiUrl);
       
-      console.error('❌ Backend API error details:', {
-        status: response.status,
-        statusText: response.statusText,
-        url: apiUrl,
-        errorData: errorData
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`, // ✅ TOKEN IN HEADER
+          'X-Shop-Domain': shop, // ✅ SHOP DOMAIN IN HEADER
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
       });
       
-      throw new Error(`Backend API error: ${response.status} - ${response.statusText}. Details: ${JSON.stringify(errorData)}`);
+      console.log('📡 Loader - Response status:', response.status);
+      
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          errorData = await response.text();
+        }
+        
+        console.error('❌ Loader - Backend API error:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData: errorData
+        });
+        
+        throw new Error(`Backend API error: ${response.status} - ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      const products = data.data?.products || data.products || [];
+
+      console.log('✅ Loader - Successfully loaded products:', products.length);
+      
+      return {
+        products: products,
+        productsCount: products.length,
+        shop: shop,
+        currentStore: shop,
+        message: data.message || 'Products loaded from database'
+      };
+    } catch (error) {
+      console.error('❌ Loader - Products fetch error:', error.message);
+      
+      return {
+        products: [],
+        productsCount: 0,
+        shop: shop,
+        currentStore: shop,
+        message: 'No products found. Click "Refresh from Shopify" to sync.',
+        error: error.message
+      };
     }
-    
-    const data = await response.json();
-    console.log('✅ Backend response data:', data);
-
-    // ✅ FIX: Extract products from data.data.products instead of data.products
-    const products = data.data?.products || data.products || [];
-    
-    console.log(`✅ Loaded ${products.length} products from Laravel backend`);
-
-    return {
-      products: products, // ✅ Now using the correct products array
-      productsCount: products.length,
-      shop: shop,
-      currentStore: shop,
-      message: data.message || 'Products loaded from database'
-    };
   } catch (error) {
-    console.error('❌ Error loading products:', error);
+    console.error('❌ Loader - Authentication error:', error.message);
+    
     return {
       products: [],
       productsCount: 0,
-      shop: shop,
-      currentStore: shop,
-      message: 'No products found. Click "Refresh from Shopify" to sync.',
+      shop: 'unknown',
+      currentStore: 'unknown',
+      message: 'Authentication failed',
       error: error.message
     };
   }
 };
 
 export const action = async ({ request }) => {
-  console.log('🔄 Sync action - SYNCING FROM SHOPIFY VIA LARAVEL');
-
-  const url = new URL(request.url);
-  const shop = url.searchParams.get('shop');
-
   try {
-    // ✅ Use the helper function to build correct URL
-    const apiUrl = buildApiUrl('products/sync');
+    const { session } = await authenticate.admin(request);
+    const shop = session.shop;
+    const accessToken = session.accessToken;
 
-    console.log('🔄 Calling sync endpoint:', apiUrl);
-    console.log('🔄 Sending shop_domain:', shop);
+    console.log('🔑 Action - Token preview:', accessToken.substring(0, 20) + '...');
+    console.log('🏪 Action - Shop:', shop);
 
-    const response = await fetch(apiUrl, {
+    if (!shop || !accessToken) {
+      throw new Error('No shop domain or access token available');
+    }
+
+    // 🚀 IMPORT LATEST PRODUCTS FROM SHOPIFY
+    const importApiUrl = `http://depop-backend.test/api/v1/shopify/products/import`;
+    
+    const importResponse = await fetch(importApiUrl, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'X-Shop-Domain': shop
       },
-      // ✅ FIX: Send as URL parameter OR in body, but be consistent
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         shop_domain: shop,
-        // ✅ Add any other required fields your backend expects
-        force_sync: true
+        session_access_token: accessToken
       })
     });
 
-    console.log('📡 Sync response status:', response.status, response.statusText);
-
-    if (!response.ok) {
-      // ✅ Get detailed error message from backend
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch (e) {
-        errorData = await response.text();
-      }
-      
-      console.error('❌ Sync API error details:', {
-        status: response.status,
-        statusText: response.statusText,
-        url: apiUrl,
-        errorData: errorData
-      });
-      
-      throw new Error(`Sync failed: ${response.status} - ${response.statusText}. ${JSON.stringify(errorData)}`);
+    if (!importResponse.ok) {
+      let errorData = await importResponse.text();
+      throw new Error(`Import failed: ${importResponse.status} - ${errorData}`);
     }
 
-    const data = await response.json();
-    console.log('✅ Sync completed:', data);
+    const importResult = await importResponse.json();
+    console.log('✅ Action - Import successful:', importResult);
 
-    // ✅ FIX: Extract products from data.data.products
-    const products = data.data?.products || data.products || [];
-
+    // ✅ SIMPLE SUCCESS RESPONSE
     return {
-      success: data.success !== false,
-      message: data.message || 'Products synced successfully',
-      products: products,
-      currentStore: shop,
-      shop: shop,
+      success: true,
+      message: `Sync initiated successfully. Products will update shortly.`,
       timestamp: Date.now()
     };
+
   } catch (error) {
-    console.error("❌ Sync action error:", error.message);
+    console.error("❌ SYNC ACTION ERROR:", error.message);
+    
     return {
       success: false,
-      message: `Sync failed: ${error.message}`,
-      timestamp: Date.now()
+      message: error.message || 'Unknown error occurred during sync',
+      timestamp: Date.now(),
+      error: error.message
     };
   }
 };
 
-// ✅ Your UI component with Shopify Connect added
 export default function ProductsPage() {
   const loaderData = useLoaderData();
   const fetcher = useFetcher();
-
-  // ✅ ADDED: Shopify Connect State
-  const [shopDomain, setShopDomain] = useState('');
-  
-  // ✅ ADDED: Shopify Install Function
-  const installShopifyApp = async (domain) => {
-    const shopDomainToUse = domain || loaderData.shop || 'your-store.myshopify.com';
-    
-    try {
-      console.log('🚀 Starting Shopify OAuth for:', shopDomainToUse);
-      
-      const response = await fetch(
-        `http://depop-backend.test/api/v1/shopify/oauth/start?shop=${shopDomainToUse}`, 
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        }
-      );
-      
-      const data = await response.json();
-      
-      if (data.redirect_url) {
-        console.log('🔀 Redirecting to:', data.redirect_url);
-        window.location.href = data.redirect_url;
-      } else {
-        console.error('❌ No redirect URL received:', data);
-        alert('Failed to start installation. Please try again.');
-      }
-    } catch (error) {
-      console.error('❌ Installation failed:', error);
-      alert('Connection failed. Please check your store domain and try again.');
-    }
-  };
-
-  console.log('📊 ProductsPage - Loader data:', {
-    shop: loaderData.shop,
-    currentStore: loaderData.currentStore,
-    productsCount: loaderData.products?.length,
-    hasError: !!loaderData.error
-  });
-
-  // ✅ ADDED: Debug products data
-  console.log('🔍 PRODUCTS DATA:', loaderData.products);
-  if (loaderData.products && loaderData.products.length > 0) {
-    console.log('🔍 FIRST PRODUCT:', loaderData.products[0]);
-  }
 
   const [products, setProducts] = useState(loaderData.products || []);
   const [currentStore, setCurrentStore] = useState(loaderData.shop || loaderData.currentStore || 'Loading...');
@@ -248,10 +199,19 @@ export default function ProductsPage() {
     }
   };
 
-  // ✅ SAFE: Helper function to safely render text
+  // Helper function to safely render text
   const safeText = (text, fallback = 'N/A') => {
     if (text === null || text === undefined) return fallback;
     return String(text);
+  };
+
+  // Get product image from photos relationship
+  const getProductImage = (product) => {
+    if (product.photos && product.photos.length > 0) {
+      const firstPhoto = product.photos[0];
+      return firstPhoto.image_path || firstPhoto.url || firstPhoto.src;
+    }
+    return null;
   };
 
   // Calculate statistics
@@ -262,54 +222,10 @@ export default function ProductsPage() {
   })?.length || 0;
 
   const totalInventory = products?.reduce((sum, product) => sum + (product.quantity_left || 0), 0) || 0;       
-
   const outOfStock = products?.filter(p => (p.quantity_left || 0) === 0)?.length || 0;
 
   return (
     <div className="products-container">
-      {/* ✅ ADDED: Shopify Connect Section */}
-      {!loaderData.shop && !loaderData.currentStore && (
-        <div style={{ 
-          margin: '20px 0', 
-          padding: '20px', 
-          border: '1px solid #ddd',
-          borderRadius: '8px',
-          backgroundColor: '#f9f9f9'
-        }}>
-          <h3>Connect Your Shopify Store</h3>
-          <p>Enter your Shopify store domain to sync products:</p>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <input
-              type="text"
-              placeholder="your-store.myshopify.com"
-              value={shopDomain}
-              onChange={(e) => setShopDomain(e.target.value)}
-              style={{ 
-                padding: '8px 12px',
-                border: '1px solid #ccc',
-                borderRadius: '4px',
-                flex: 1,
-                maxWidth: '300px'
-              }}
-            />
-            <button 
-              onClick={() => installShopifyApp(shopDomain)}
-              disabled={!shopDomain}
-              style={{ 
-                padding: '10px 20px', 
-                background: shopDomain ? '#000' : '#ccc', 
-                color: '#fff', 
-                border: 'none',
-                borderRadius: '4px',
-                cursor: shopDomain ? 'pointer' : 'not-allowed'
-              }}
-            >
-              Connect Shopify
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Header Section */}
       <div className="products-header">
         <div className="header-content">
@@ -335,7 +251,7 @@ export default function ProductsPage() {
               ) : (
                 <>
                   <span className="sync-icon">🔄</span>
-                  Refresh from Shopify
+                  Latest Update
                 </>
               )}
             </button>
@@ -386,7 +302,7 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      {/* Products Table - FIXED RENDERING */}
+      {/* Products Table */}
       <div className="products-table-container">
         <table className="products-table">
           <thead>
@@ -395,68 +311,69 @@ export default function ProductsPage() {
               <th>Brand</th>
               <th>Price</th>
               <th>Inventory</th>
-              <th>Status</th>
+              <th>Condition</th>
             </tr>
           </thead>
           <tbody>
             {products && products.length > 0 ? (
-              products.map((product) => (
-                <tr key={product.id} className="product-row">
-                  <td className="product-info-cell">
-                    <div className="product-info">
-                      {product.images && product.images.length > 0 ? (
-                        <img
-                          src={product.images[0].src}
-                          alt={safeText(product.title)}
-                          className="product-thumbnail"
-                        />
-                      ) : (
-                        <div className="no-image-placeholder">No Image</div>
-                      )}
-                      <div className="product-text-info">
-                        <div className="product-title-table">
-                          {/* ✅ SAFE: Ensure title is a string */}
-                          {safeText(product.title, 'No Title')}
-                        </div>
-                        {product.description && (
-                          <div className="product-description-table">
-                            {/* ✅ SAFE: Convert description to string */}
-                            {safeText(product.description).substring(0, 80)}...
-                          </div>
+              products.map((product) => {
+                const productImage = getProductImage(product);
+
+                return (
+                  <tr key={product.id} className="product-row">
+                    <td className="product-info-cell">
+                      <div className="product-info">
+                        {productImage ? (
+                          <img
+                            src={productImage}
+                            alt={safeText(product.title)}
+                            className="product-thumbnail"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div className="no-image-placeholder">No Image</div>
                         )}
+                        <div className="product-text-info">
+                          <div className="product-title-table">
+                            {safeText(product.title, 'No Title')}
+                          </div>
+                          {product.description && product.description !== 'No Description' && (
+                            <div className="product-description-table">
+                              {safeText(product.description).substring(0, 80)}...
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </td>
+                    </td>
 
-                  <td>
-                    <span className="brand-value">
-                      {/* ✅ SAFE: Ensure brand is a string */}
-                      {safeText(product.brand, 'No Brand')}
-                    </span>
-                  </td>
+                    <td>
+                      <span className="brand-value">
+                        {product.brand?.name || safeText(product.brand, 'No Brand')}
+                      </span>
+                    </td>
 
-                  <td>
-                    <span className="price-value-table">
-                      {/* ✅ SAFE: Handle price conversion */}
-                      {product.price ? `$${parseFloat(product.price).toFixed(2)}` : 'N/A'}
-                    </span>
-                  </td>
+                    <td>
+                      <span className="price-value-table">
+                        {product.price ? `$${parseFloat(product.price).toFixed(2)}` : 'N/A'}
+                      </span>
+                    </td>
 
-                  <td>
-                    <span className={`inventory-badge ${(product.quantity_left || 0) > 0 ? 'in-stock' : 'out-of-stock'}`}>
-                      {/* ✅ SAFE: Ensure number */}
-                      {Number(product.quantity_left || 0)}
-                    </span>
-                  </td>
+                    <td>
+                      <span className={`inventory-badge ${(product.quantity_left || 0) > 0 ? 'in-stock' : 'out-of-stock'}`}>
+                        {Number(product.quantity_left || 0)}
+                      </span>
+                    </td>
 
-                  <td>
-                    <span className={`condition-badge ${safeText(product.condition || 'unknown').toLowerCase().replace(/\s+/g, '-')}`}>
-                      {/* ✅ SAFE: Ensure condition is a string */}
-                      {safeText(product.condition, 'Unknown')}
-                    </span>
-                  </td>
-                </tr>
-              ))
+                    <td>
+                      <span className={`condition-badge ${safeText(product.condition?.title || product.condition || 'unknown').toLowerCase().replace(/\s+/g, '-')}`}>
+                        {product.condition?.title || safeText(product.condition, 'Unknown')}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan="5" className="empty-state">
