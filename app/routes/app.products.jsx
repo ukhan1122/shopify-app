@@ -25,8 +25,12 @@ export const loader = async ({ request }) => {
     const shop = session.shop;
     const accessToken = session.accessToken;
 
-    console.log('🔑 Loader - Token preview:', accessToken?.substring(0, 20) + '...');
-    console.log('🏪 Loader - Shop:', shop);
+
+    console.log('🔍 DEBUG LOADER - Full access token:', accessToken);
+    console.log('🔍 DEBUG LOADER - Token length:', accessToken?.length);
+    console.log('🔍 DEBUG LOADER - Token preview:', accessToken?.substring(0, 20) + '...');
+    console.log('🔍 DEBUG LOADER - Shop:', shop);
+    console.log('🔍 DEBUG LOADER - Session ID:', session.id);
 
     if (!shop || !accessToken) {
       throw new Error('No shop domain or access token available in loader');
@@ -108,8 +112,11 @@ export const action = async ({ request }) => {
     const shop = session.shop;
     const accessToken = session.accessToken;
 
-    console.log('🔑 Action - Token preview:', accessToken.substring(0, 20) + '...');
-    console.log('🏪 Action - Shop:', shop);
+    console.log('🔍 DEBUG ACTION - Full access token:', accessToken);
+    console.log('🔍 DEBUG ACTION - Token length:', accessToken?.length);
+    console.log('🔍 DEBUG ACTION - Token preview:', accessToken?.substring(0, 20) + '...');
+    console.log('🔍 DEBUG ACTION - Shop:', shop);
+    console.log('🔍 DEBUG ACTION - Session ID:', session.id);
 
     if (!shop || !accessToken) {
       throw new Error('No shop domain or access token available');
@@ -117,7 +124,13 @@ export const action = async ({ request }) => {
 
     // 🚀 IMPORT LATEST PRODUCTS FROM SHOPIFY
     const importApiUrl = `http://depop-backend.test/api/v1/shopify/products/import`;
-    
+
+    console.log('📡 DEBUG ACTION - Calling import endpoint:', importApiUrl);
+    console.log('📡 DEBUG ACTION - Request headers:', {
+      'Authorization': `Bearer ${accessToken}`,
+      'X-Shop-Domain': shop
+    });
+
     const importResponse = await fetch(importApiUrl, {
       method: 'POST',
       headers: {
@@ -128,17 +141,27 @@ export const action = async ({ request }) => {
       },
       body: JSON.stringify({
         shop_domain: shop,
-        session_access_token: accessToken
+        session_access_token: accessToken,
+        // Add more debug info
+        debug_info: {
+          token_length: accessToken.length,
+          session_id: session.id,
+          timestamp: new Date().toISOString()
+        }
       })
     });
 
+    console.log('📡 DEBUG ACTION - Import response status:', importResponse.status);
+    console.log('📡 DEBUG ACTION - Import response ok:', importResponse.ok);
+
     if (!importResponse.ok) {
       let errorData = await importResponse.text();
+      console.error('❌ DEBUG ACTION - Import failed with response:', errorData);
       throw new Error(`Import failed: ${importResponse.status} - ${errorData}`);
     }
 
     const importResult = await importResponse.json();
-    console.log('✅ Action - Import successful:', importResult);
+    console.log('✅ DEBUG ACTION - Import successful:', importResult);
 
     // ✅ SIMPLE SUCCESS RESPONSE
     return {
@@ -149,7 +172,8 @@ export const action = async ({ request }) => {
 
   } catch (error) {
     console.error("❌ SYNC ACTION ERROR:", error.message);
-    
+    console.error("❌ SYNC ACTION STACK:", error.stack);
+
     return {
       success: false,
       message: error.message || 'Unknown error occurred during sync',

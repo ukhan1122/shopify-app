@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration    
 
-client_id = "d5430acfa212b8093c05dc868984ee34"
+client_id = "ccc66e1a97ceced7c795dc8ed2a5a938"
 name = "Smart Product Sync"
 application_url = "https://resumes-setup-clients-courtesy.trycloudflare.com"
 

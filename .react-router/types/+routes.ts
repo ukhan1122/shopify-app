@@ -26,6 +26,9 @@ type Pages = {
   "/webhooks/products/update": {
     params: {};
   };
+  "/debug/oauth": {
+    params: {};
+  };
   "/auth/login": {
     params: {};
   };
@@ -54,7 +57,7 @@ type Pages = {
 type RouteFiles = {
   "root.jsx": {
     id: "root";
-    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/app/uninstalled" | "/webhooks/products/delete" | "/webhooks/products/update" | "/auth/login" | "/debug/env" | "/api/auth" | "/auth/*" | "/app" | "/app/additional" | "/app/products";
+    page: "/" | "/webhooks/app/scopes_update" | "/webhooks/app/uninstalled" | "/webhooks/products/delete" | "/webhooks/products/update" | "/debug/oauth" | "/auth/login" | "/debug/env" | "/api/auth" | "/auth/*" | "/app" | "/app/additional" | "/app/products";
   };
   "routes/webhooks.app.scopes_update.jsx": {
     id: "routes/webhooks.app.scopes_update";
@@ -71,6 +74,10 @@ type RouteFiles = {
   "routes/webhooks.products.update.jsx": {
     id: "routes/webhooks.products.update";
     page: "/webhooks/products/update";
+  };
+  "routes/debug.oauth.jsx": {
+    id: "routes/debug.oauth";
+    page: "/debug/oauth";
   };
   "routes/auth.login/route.jsx": {
     id: "routes/auth.login";
@@ -116,6 +123,7 @@ type RouteModules = {
   "routes/webhooks.app.uninstalled": typeof import("./app/routes/webhooks.app.uninstalled.jsx");
   "routes/webhooks.products.delete": typeof import("./app/routes/webhooks.products.delete.jsx");
   "routes/webhooks.products.update": typeof import("./app/routes/webhooks.products.update.jsx");
+  "routes/debug.oauth": typeof import("./app/routes/debug.oauth.jsx");
   "routes/auth.login": typeof import("./app/routes/auth.login/route.jsx");
   "routes/debug.env": typeof import("./app/routes/debug.env.jsx");
   "routes/api.auth": typeof import("./app/routes/api.auth.jsx");

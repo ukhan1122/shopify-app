@@ -1,58 +1,43 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { authenticate } from "../shopify.server";
+import { authenticate, loginErrorMessage } from "../shopify.server";
+import { redirect } from "react-router";
 
 export const loader = async ({ request }) => {
-  console.log('🎯 OAuth CALLBACK TRIGGERED');
+  console.log('🎉 OAuth CALLBACK TRIGGERED');
 
   try {
     const { session, admin } = await authenticate.admin(request);
-    
+
     console.log('✅ OAuth SUCCESS - Session created');
-    console.log('🏪 Shop:', session?.shop);
-    console.log('🔐 Token preview:', session?.accessToken?.substring(0, 15) + '...');
+    console.log('🔍 Shop:', session?.shop);
+    console.log('🔑 Token preview:', session?.accessToken?.substring(0, 20) + '...');
+    console.log('📏 Token length:', session?.accessToken?.length);
+    console.log('🔄 Is Online:', session?.isOnline);
+    console.log('🎯 Scope:', session?.scope);
 
     const accessToken = session?.accessToken;
     const shopDomain = session?.shop;
-    
+
     if (!accessToken || !shopDomain) {
       console.log('❌ MISSING TOKEN OR SHOP DOMAIN');
-      return null;
+      throw new Error('Missing token or shop domain');
     }
 
-    console.log('🚀 Saving to Laravel...');
-    
-    try {
-      const laravelResponse = await fetch('http://depop-backend.test/api/v1/shopify/save-token-simple', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          shop_domain: shopDomain,
-          access_token: accessToken
-        })
-      });
-
-      console.log('📨 Laravel Response Status:', laravelResponse.status);
-      
-      // ✅ Even if status is 404, continue OAuth flow
-      const result = await laravelResponse.json();
-      console.log('📨 Laravel Response:', result);
-      
-      if (laravelResponse.ok) {
-        console.log('✅✅✅ TOKEN SAVED TO LARAVEL');
-      } else {
-        console.log('⚠️ Laravel API returned non-200 but continuing OAuth');
-      }
-    } catch (apiError) {
-      console.log('❌ Laravel API error:', apiError.message);
-      // Continue OAuth flow even if API fails
+    // 🚨 CRITICAL: Check token length
+    if (accessToken.length < 50) {
+      console.log('🚨 INVALID TOKEN LENGTH:', accessToken.length);
+      throw new Error(`Invalid token length: ${accessToken.length}. Expected 50+ characters.`);  
     }
 
-    return null;
+    console.log('🚀 OAuth completed successfully - redirecting to app');
+
+    // 🎯 CRITICAL FIX: Redirect to app instead of returning null
+    console.log('🔀 Redirecting to /app');
+    return redirect('/app');
+
   } catch (error) {
     console.log('❌ OAuth failed:', error.message);
+    console.log('📝 OAuth error details:', error);
     throw error;
   }
 };

@@ -12,6 +12,48 @@ console.log('🛠️ Shopify server initializing...');
 // ✅ Initialize Prisma client
 const prisma = new PrismaClient();
 
+// 🐛 DEBUG: Create debug session storage
+const originalStorage = new PrismaSessionStorage(prisma);
+
+const debugStorage = {
+  async storeSession(session) {
+    console.log('💾 DEBUG STORING SESSION:');
+    console.log('  Shop:', session.shop);
+    console.log('  Token:', session.accessToken);
+    console.log('  Token length:', session.accessToken?.length);
+    console.log('  Session ID:', session.id);
+    console.log('  Is Online:', session.isOnline);
+    
+    const result = await originalStorage.storeSession(session);
+    console.log('💾 DEBUG SESSION STORED');
+    return result;
+  },
+  
+  async loadSession(id) {
+    console.log('📂 DEBUG LOADING SESSION:', id);
+    const session = await originalStorage.loadSession(id);
+    if (session) {
+      console.log('📂 DEBUG LOADED SESSION:');
+      console.log('  Shop:', session.shop);
+      console.log('  Token:', session.accessToken);
+      console.log('  Token length:', session.accessToken?.length);
+    } else {
+      console.log('📂 DEBUG NO SESSION FOUND FOR ID:', id);
+    }
+    return session;
+  },
+  
+  async deleteSession(id) {
+    console.log('🗑️ DEBUG DELETING SESSION:', id);
+    return await originalStorage.deleteSession(id);
+  },
+  
+  async findSessionsByShop(shop) {
+    console.log('🔍 DEBUG FINDING SESSIONS FOR SHOP:', shop);
+    return await originalStorage.findSessionsByShop(shop);
+  }
+};
+
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
@@ -27,8 +69,9 @@ const shopify = shopifyApp({
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
 
-  // ✅ Pass the instantiated Prisma client
-  sessionStorage: new PrismaSessionStorage(prisma),
+  // ✅ Use debug session storage
+  sessionStorage: debugStorage,
+
 
   distribution: AppDistribution.AppStore,
   isEmbeddedApp: true,
